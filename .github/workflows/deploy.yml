@@ -22,6 +22,67 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable corepack (pnpm)
+        run: corepack enable
+
+      - name: Assemble site
+        run: |
+          set -euo pipefail
+          mkdir -p _site
+
+          # Root static site: copy everything except repo meta and app dirs
+          # (any top-level directory with a package.json is a built game).
+          excludes=(--exclude '.git*' --exclude '_site')
+          for d in */; do
+            [ -f "$d/package.json" ] && excludes+=(--exclude "/$d")
+          done
+          rsync -a "${excludes[@]}" ./ _site/
+
+          # Built games: install, build, publish dist/ under /<dir>/
+          apps=()
+          for d in */; do
+            d="${d%/}"
+            [ -f "$d/package.json" ] || continue
+            echo "::group::Building $d"
+            if [ -f "$d/pnpm-lock.yaml" ]; then
+              (cd "$d" && pnpm install --frozen-lockfile && pnpm run build)
+            else
+              (cd "$d" && npm ci && npm run build)
+            fi
+            mkdir -p "_site/$d"
+            cp -R "$d/dist/." "_site/$d/"
+            apps+=("$d")
+            echo "::endgroup::"
+          done
+
+          # Service worker: precache the built games' hashed files and stamp
+          # the cache name so old caches are dropped on each deploy.
+          node -e '
+            const fs = require("fs"), path = require("path");
+            const files = [];
+            for (const d of process.argv.slice(1)) {
+              files.push("./" + d + "/");
+              const walk = (p) => {
+                for (const e of fs.readdirSync(p, { withFileTypes: true })) {
+                  const f = path.join(p, e.name);
+                  if (e.isDirectory()) walk(f);
+                  else files.push("./" + path.relative("_site", f));
+                }
+              };
+              walk(path.join("_site", d));
+            }
+            let sw = fs.readFileSync("_site/sw.js", "utf8");
+            sw = sw.replace("var BUILT_PRECACHE = [];",
+              "var BUILT_PRECACHE = " + JSON.stringify(files) + ";");
+            sw = sw.replace("var BUILD = \"\";",
+              "var BUILD = " + JSON.stringify(process.env.GITHUB_SHA.slice(0, 8)) + ";");
+            fs.writeFileSync("_site/sw.js", sw);
+          ' "${apps[@]}"
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
         with:
@@ -30,7 +91,7 @@ jobs:
       - name: Upload site artifact
         uses: actions/upload-pages-artifact@v5
         with:
-          path: .
+          path: _site
 
       - name: Deploy to GitHub Pages
         id: deployment

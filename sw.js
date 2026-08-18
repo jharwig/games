@@ -1,5 +1,11 @@
 /* Service worker: makes the site available offline. */
-var CACHE = "games-v2";
+/* BUILD is stamped by the deploy workflow so each deploy gets a fresh cache. */
+var BUILD = "";
+var CACHE = "games-v3" + (BUILD ? "-" + BUILD : "");
+
+/* Filled in by the deploy workflow with each built game's dist files
+   (their filenames are content-hashed, so they can't be listed here). */
+var BUILT_PRECACHE = [];
 
 var PRECACHE = [
   "./",
@@ -11,7 +17,7 @@ var PRECACHE = [
   "./icons/icon-192.png",
   "./icons/icon-512.png",
   "./icons/apple-touch-icon.png"
-];
+].concat(BUILT_PRECACHE);
 
 self.addEventListener("install", function (event) {
   event.waitUntil(

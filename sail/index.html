@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>REGATTA // offshore arcade</title>
+  <style>
+    :root {
+      --accent: #ffd12e;
+      --accent2: #ff5c39;
+      --ink: #eef6fb;
+      --panel: rgba(8, 24, 38, 0.78);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #06283d; }
+    body {
+      font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    #app { position: fixed; inset: 0; }
+    canvas.game { display: block; }
+
+    .overlay { position: fixed; inset: 0; pointer-events: none; }
+
+    /* ---------- HUD ---------- */
+    #hud { opacity: 0; transition: opacity .4s; }
+    #hud.visible { opacity: 1; }
+
+    .hud-panel {
+      position: absolute;
+      background: var(--panel);
+      border-radius: 14px;
+      backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 10px 14px;
+    }
+    #speedo { left: 24px; bottom: 24px; text-align: left; min-width: 130px; }
+    #speedo .big { font-size: 44px; font-weight: 800; font-style: italic; line-height: 1; letter-spacing: -1px; }
+    #speedo .unit { font-size: 12px; font-weight: 700; opacity: .6; letter-spacing: 2px; }
+    #spi-chip {
+      display: none; margin-top: 6px; font-size: 11px; font-weight: 800; letter-spacing: 1px;
+      color: #072033; background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 999px; padding: 3px 10px; width: fit-content;
+    }
+    #ocs-banner {
+      display: none; position: absolute; left: 50%; top: 90px; transform: translateX(-50%);
+      font-size: 18px; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      color: #fff; background: #d33131; padding: 8px 22px; border-radius: 999px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.4);
+      animation: ocs-pulse 0.9s ease-in-out infinite;
+    }
+    @keyframes ocs-pulse { 50% { transform: translateX(-50%) scale(1.06); } }
+    #penalty-banner {
+      display: none; position: absolute; left: 50%; top: 132px; transform: translateX(-50%);
+      font-size: 18px; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      color: #10181f; background: var(--accent); padding: 8px 22px; border-radius: 999px;
+      box-shadow: 0 4px 14px rgba(0,0,0,.4);
+      animation: ocs-pulse 0.9s ease-in-out infinite;
+    }
+
+    #race-info { left: 50%; top: 18px; transform: translateX(-50%); text-align: center; display:flex; gap:26px; align-items: baseline; }
+    #race-info .lap { font-size: 26px; font-weight: 800; font-style: italic; color: var(--accent); }
+    #race-info .pos { font-size: 26px; font-weight: 800; font-style: italic; }
+    #race-info .time { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; opacity: .9; }
+    #race-info .sub { font-size: 10px; letter-spacing: 2px; opacity: .55; display:block; font-style: normal; font-weight: 700;}
+
+    #wind-dial { right: 24px; top: 24px; width: 108px; height: 108px; border-radius: 50%; display:flex; align-items:center; justify-content:center; }
+    #wind-dial svg { width: 84px; height: 84px; overflow: visible; }
+    #wind-speed-label { position:absolute; bottom: 8px; width:100%; text-align:center; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--accent); }
+
+    #trim-panel { right: 24px; bottom: 24px; width: 64px; height: 190px; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    #trim-panel .label { font-size: 10px; font-weight: 800; letter-spacing: 2px; opacity: .6; }
+    #trim-track { position: relative; flex: 1; width: 14px; border-radius: 7px; background: rgba(255,255,255,0.12); }
+    #trim-fill { position: absolute; bottom: 0; width: 100%; border-radius: 7px; background: linear-gradient(180deg, var(--accent), var(--accent2)); height: 50%; }
+    #trim-opt { position: absolute; left: -7px; width: 28px; height: 3px; background: #4dffa6; border-radius: 2px; bottom: 50%; box-shadow: 0 0 6px #4dffa6; }
+    #trim-panel .cap { font-size: 9px; font-weight: 700; opacity:.5; letter-spacing:1px; }
+
+    #minimap { left: 24px; top: 24px; padding: 8px; }
+    #minimap canvas { display: block; border-radius: 8px; }
+
+    .speech-bubble {
+      position: absolute; left: 0; top: 0; display: none;
+      font-size: 17px; font-weight: 900; font-style: italic; letter-spacing: .5px;
+      color: #10181f; background: #ffffff;
+      border: 3px solid #10181f; border-radius: 16px; padding: 6px 14px;
+      transform-origin: bottom left;
+      white-space: nowrap; pointer-events: none;
+      box-shadow: 3px 4px 0 rgba(0,0,0,.35);
+    }
+    .speech-bubble::after {
+      content: ''; position: absolute; left: 10px; bottom: -12px;
+      border: 7px solid transparent; border-top-color: #10181f;
+      border-left-color: #10181f;
+    }
+    .speech-bubble.pop { display: block; animation: bubble-pop .18s ease-out; }
+    @keyframes bubble-pop { 0% { scale: 0.2; } 70% { scale: 1.15; } 100% { scale: 1; } }
+
+    #mark-pointer {
+      position: absolute; left: 0; top: 0; display: none;
+      flex-direction: column; align-items: center; gap: 0;
+      pointer-events: none;
+    }
+    #mark-pointer .chevron {
+      font-size: 26px; color: var(--accent); line-height: 1;
+      text-shadow: 0 0 10px rgba(255, 209, 46, .8), 0 2px 4px rgba(0,0,0,.5);
+    }
+    #mark-pointer .dist {
+      font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--accent);
+      background: rgba(8, 24, 38, 0.7); border-radius: 999px; padding: 1px 8px;
+      transform: translateY(-2px);
+    }
+
+    #message {
+      position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%);
+      font-size: 110px; font-weight: 900; font-style: italic; letter-spacing: -3px;
+      color: var(--accent); text-shadow: 0 6px 0 rgba(0,0,0,.25);
+      opacity: 0; transition: transform .15s, opacity .15s;
+    }
+    #message.pop { opacity: 1; transform: translate(-50%, -50%) scale(1.06); }
+
+    #toast {
+      position: absolute; left: 50%; bottom: 15%; transform: translateX(-50%);
+      font-size: 20px; font-weight: 800; font-style: italic; letter-spacing: 1px;
+      color: #fff; opacity: 0; transition: opacity .3s;
+      background: var(--panel); padding: 8px 22px; border-radius: 999px;
+    }
+    #toast.show { opacity: 1; }
+
+    /* ---------- MENU ---------- */
+    #menu {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 34px;
+      background: radial-gradient(120% 100% at 50% 0%, rgba(10,48,72,0.35), rgba(4,18,30,0.88));
+      pointer-events: auto; transition: opacity .5s;
+    }
+    #menu.hidden { opacity: 0; pointer-events: none; }
+    #menu h1 {
+      font-size: 84px; font-weight: 900; font-style: italic; letter-spacing: -4px;
+      color: #fff; line-height: .9; text-align: center;
+      text-shadow: 0 8px 0 rgba(0,0,0,.28);
+    }
+    #menu h1 span { color: var(--accent); }
+    #menu .tag { font-size: 13px; letter-spacing: 6px; font-weight: 700; opacity: .65; text-align:center; margin-top: 10px;}
+
+    .fleet { display: flex; gap: 22px; }
+    .boat-card {
+      width: 210px; padding: 18px 18px 16px; border-radius: 18px; cursor: pointer;
+      background: var(--panel); border: 2px solid rgba(255,255,255,0.1);
+      transition: transform .15s, border-color .15s, box-shadow .15s;
+      text-align: left;
+    }
+    .boat-card:hover { transform: translateY(-4px); }
+    .boat-card.selected { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,209,46,.25), 0 14px 30px rgba(0,0,0,.35); transform: translateY(-6px); }
+    .boat-card .key { font-size: 11px; font-weight: 800; color: var(--accent); letter-spacing: 2px; }
+    .boat-card h3 { font-size: 22px; font-weight: 900; font-style: italic; margin: 2px 0 2px; }
+    .boat-card .type { font-size: 11px; letter-spacing: 2px; opacity: .55; font-weight: 700; margin-bottom: 12px; }
+    .stat { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+    .stat .name { font-size: 10px; width: 46px; letter-spacing: 1px; opacity: .6; font-weight: 700; }
+    .stat .bar { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.12); overflow: hidden; }
+    .stat .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+
+    .course-picker { display: flex; gap: 12px; }
+    .course-chip {
+      cursor: pointer; font-size: 12px; font-weight: 800; letter-spacing: 2px;
+      color: var(--ink); background: var(--panel); border: 2px solid rgba(255,255,255,0.12);
+      border-radius: 999px; padding: 10px 22px; transition: border-color .15s, color .15s;
+    }
+    .course-chip.selected { border-color: var(--accent); color: var(--accent); }
+
+    #start-btn {
+      pointer-events: auto; cursor: pointer;
+      font: inherit; font-size: 22px; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      color: #072033; background: linear-gradient(180deg, var(--accent), #ffb52e);
+      border: none; border-radius: 999px; padding: 16px 58px;
+      box-shadow: 0 8px 0 rgba(0,0,0,.3);
+      transition: transform .1s;
+    }
+    #start-btn:hover { transform: scale(1.05); }
+    #start-btn:active { transform: scale(.98) translateY(3px); box-shadow: 0 4px 0 rgba(0,0,0,.3); }
+
+    .controls-hint { font-size: 12px; letter-spacing: 1px; opacity: .6; font-weight: 600; text-align: center; line-height: 1.9; }
+    .controls-hint b { color: var(--accent); font-weight: 800; }
+
+    /* ---------- RESULTS ---------- */
+    #results {
+      position: fixed; inset: 0; display: none; flex-direction: column;
+      align-items: center; justify-content: center; gap: 22px;
+      background: rgba(4, 18, 30, 0.72); pointer-events: auto;
+    }
+    #results.visible { display: flex; }
+    #results h2 { font-size: 64px; font-weight: 900; font-style: italic; color: var(--accent); letter-spacing: -2px; text-shadow: 0 6px 0 rgba(0,0,0,.25); }
+    #results table { border-collapse: collapse; background: var(--panel); border-radius: 16px; overflow: hidden; }
+    #results td, #results th { padding: 10px 26px; font-size: 16px; text-align: left; }
+    #results th { font-size: 10px; letter-spacing: 2px; opacity: .5; }
+    #results tr.you td { color: var(--accent); font-weight: 800; }
+    #results .hint { font-size: 13px; opacity: .65; font-weight: 700; letter-spacing: 1px; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <div class="overlay" id="hud">
+    <div class="hud-panel" id="minimap"><canvas id="minimap-canvas" width="150" height="150"></canvas></div>
+    <div class="hud-panel" id="speedo">
+      <div class="big" id="speed-val">0.0</div>
+      <div class="unit">KNOTS</div>
+      <div id="spi-chip">SPI ▲</div>
+    </div>
+    <div id="ocs-banner">⟲ OCS — RETURN BEHIND THE LINE</div>
+    <div id="penalty-banner">⚠ PENALTY — KEEP CLEAR NEXT TIME</div>
+    <div class="hud-panel" id="race-info">
+      <div><span class="lap" id="lap-val">LAP 1/3</span><span class="sub">LAP</span></div>
+      <div><span class="pos" id="pos-val">1st</span><span class="sub">POSITION</span></div>
+      <div><span class="time" id="time-val">0:00.0</span><span class="sub">TIME</span></div>
+    </div>
+    <div class="hud-panel" id="wind-dial">
+      <svg viewBox="-50 -50 100 100">
+        <circle r="46" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="2"/>
+        <g id="wind-arrow">
+          <path d="M 0 -40 L 10 -18 L 0 -24 L -10 -18 Z" fill="#ffd12e"/>
+          <line x1="0" y1="-22" x2="0" y2="30" stroke="#ffd12e" stroke-width="4" stroke-linecap="round"/>
+        </g>
+        <path id="boat-tick" d="M 0 -8 L 5 6 L 0 3 L -5 6 Z" fill="#ffffff" opacity="0.9"/>
+      </svg>
+      <div id="wind-speed-label">— KTS</div>
+    </div>
+    <div class="hud-panel" id="trim-panel">
+      <div class="label">SHEET</div>
+      <div class="cap">IN</div>
+      <div id="trim-track"><div id="trim-fill"></div><div id="trim-opt"></div></div>
+      <div class="cap">OUT</div>
+    </div>
+    <div id="mark-pointer">
+      <div class="chevron">▲</div>
+      <div class="dist" id="mark-dist">120m</div>
+    </div>
+    <div id="message"></div>
+    <div id="toast"></div>
+  </div>
+
+  <div id="menu">
+    <div>
+      <h1>REGATTA<span>//</span></h1>
+      <div class="tag">OFFSHORE ARCADE RACING</div>
+    </div>
+    <div class="fleet" id="fleet"></div>
+    <div class="course-picker" id="course-picker"></div>
+    <button id="start-btn">RACE ▸</button>
+    <div class="controls-hint">
+      <b>◀ ▶</b> / <b>A D</b> — steer &nbsp;•&nbsp; <b>▲ ▼</b> / <b>W S</b> — sheet in / ease out &nbsp;•&nbsp; <b>SPACE</b> — spinnaker &nbsp;•&nbsp; <b>R</b> — restart<br/>
+      15s pre-start: maneuver behind the line, cross it early and you're OCS (go back!).<br/>
+      green mark on the sheet gauge = perfect trim. beam reach is fast; fly the kite on the runs.
+    </div>
+  </div>
+
+  <div id="results">
+    <h2 id="results-title">FINISH!</h2>
+    <table id="results-table"></table>
+    <div class="hint">PRESS R OR ENTER TO RACE AGAIN</div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
