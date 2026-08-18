@@ -981,10 +981,11 @@ function addPlatform(c, z0, z1, y, w, hex, isPodium) {
   var len = z1 - z0;
   var cz = (z0 + z1) / 2;
   box(g, 0, y - 0.25, cz, w, 0.5, len, hex);                       // bright top slab
-  box(g, 0, y - 1.15, cz, w * 0.82, 1.3, len * 0.97, shade(hex, 0.55)); // chunky under body
+  box(g, 0, y - 1.16, cz, w * 0.82, 1.3, len * 0.97, shade(hex, 0.55)); // chunky under body
   // striped end caps make the jump edges easy to read
-  box(g, 0, y - 0.24, z1 - 0.28, w * 1.02, 0.56, 0.56, 0x16324f);
-  box(g, 0, y - 0.24, z0 + 0.28, w * 1.02, 0.56, 0.56, 0x16324f);
+  // (they protrude 0.02 past the slab ends so no faces are coplanar)
+  box(g, 0, y - 0.24, z1 - 0.26, w * 1.02, 0.56, 0.56, 0x16324f);
+  box(g, 0, y - 0.24, z0 + 0.26, w * 1.02, 0.56, 0.56, 0x16324f);
   if (len > 5.5) addBunting(c, z0 + 0.6, z1 - 0.6, y, w);
   var p = { z0: z0, z1: z1, y: y, isPodium: !!isPodium };
   c.platforms.push(p);
