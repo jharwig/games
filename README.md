@@ -25,3 +25,22 @@ The scene is drawn on a 160×288 pixel canvas: a starry sky with a cratered moon
 - **Space** — flap
 - **M** — mute / unmute the sound
 - Any input on the title or game-over screen starts a new run.
+
+## Ninja Adventure
+
+**Designed by Gemma**
+
+**Play:** https://jharwig.github.io/games/ninja/
+
+Ninja Adventure is a third-person 3D obstacle-course game in a bright cartoon look. You run a ninja-warrior course full of very colorful obstacles: jumps with flips, rope climbs, rope swings, monkey bars, and laché bars. Each course is randomly generated, and each level is more difficult than the one before.
+
+- Reach the podium at the end of each level to get a gold, silver, or bronze medal. The faster you are, the better the medal.
+- If you fall, you go back to the last podium and try again.
+- The game is endless. Your score is the number of podiums you reach.
+- Your best run is saved in the browser.
+
+### Controls
+
+- **Hold W / Up** — run (on touch, hold the left half of the screen)
+- **Space** — jump / grab / release (on touch, tap the right half of the screen)
+- **M** — mute / unmute the sound

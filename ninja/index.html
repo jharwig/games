@@ -1,0 +1,2068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Ninja Adventure</title>
+<meta name="theme-color" content="#4fb8f5">
+<link rel="manifest" href="../manifest.webmanifest">
+<link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="../icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="../icons/apple-touch-icon.png">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    width: 100%;
+    background: #7fd0ff;
+    overflow: hidden;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
+  }
+  body {
+    font-family: "Trebuchet MS", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    color: #10233a;
+  }
+  canvas { display: block; width: 100%; height: 100%; }
+
+  /* ---------------- HUD ---------------- */
+  #hud {
+    position: fixed;
+    left: 0; right: 0;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    padding: 0 calc(env(safe-area-inset-left, 0px) + 12px) 0 calc(env(safe-area-inset-right, 0px) + 12px);
+    display: none;
+    flex-direction: column;
+    gap: 6px;
+    pointer-events: none;
+    z-index: 5;
+  }
+  #hud.visible { display: flex; }
+  #hudRow {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .chip {
+    background: rgba(255,255,255,0.82);
+    border: 3px solid #16324f;
+    border-radius: 12px;
+    padding: 4px 10px;
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: 0.06em;
+    line-height: 1.15;
+    box-shadow: 0 3px 0 rgba(22,50,79,0.35);
+    white-space: nowrap;
+  }
+  #timeChip { font-variant-numeric: tabular-nums; min-width: 74px; text-align: center; }
+  #medals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    max-width: 62%;
+  }
+  .medal {
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    border: 2px solid #16324f;
+    box-shadow: 0 2px 0 rgba(22,50,79,0.3);
+  }
+  .medal.gold   { background: #ffcf2e; }
+  .medal.silver { background: #dfe6ee; }
+  .medal.bronze { background: #e08a45; }
+  #medalMore { font-weight: 800; font-size: 13px; color: #16324f; text-shadow: 0 1px 0 #fff; }
+
+  /* ---------------- buttons ---------------- */
+  #muteBtn {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    right: calc(env(safe-area-inset-right, 0px) + 12px);
+    width: 42px; height: 42px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255,255,255,0.82);
+    border: 3px solid #16324f;
+    border-radius: 12px;
+    box-shadow: 0 3px 0 rgba(22,50,79,0.35);
+    cursor: pointer;
+    z-index: 8;
+    font-size: 19px;
+    line-height: 1;
+    touch-action: manipulation;
+  }
+  #muteBtn.visible { display: flex; }
+  #muteBtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(22,50,79,0.35); }
+
+  /* ---------------- overlays ---------------- */
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+  .overlay.visible { display: flex; }
+
+  #title { background: rgba(12,40,68,0.34); }
+  #titleCard {
+    background: rgba(255,255,255,0.93);
+    border: 5px solid #16324f;
+    border-radius: 22px;
+    box-shadow: 0 8px 0 rgba(22,50,79,0.4);
+    padding: 20px 26px 22px;
+    max-width: 380px;
+    width: min(88vw, 380px);
+    text-align: center;
+    max-height: 86vh;
+    overflow: auto;
+  }
+  #titleCard h1 {
+    margin: 0;
+    font-size: clamp(34px, 11vw, 52px);
+    letter-spacing: 0.02em;
+    line-height: 0.98;
+    color: #ff2e88;
+    text-shadow: 3px 3px 0 #16324f;
+  }
+  #titleCard .by {
+    margin: 8px 0 14px;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    color: #2a6fa8;
+    text-transform: uppercase;
+  }
+  #titleCard .blurb { margin: 0 0 14px; font-size: 14px; line-height: 1.45; color: #24405c; }
+  .keys { text-align: left; margin: 0 auto 14px; display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; font-size: 13.5px; }
+  .keys b {
+    background: #16324f; color: #fff; border-radius: 7px;
+    padding: 3px 8px; font-size: 12px; text-align: center; white-space: nowrap;
+  }
+  .keys span { align-self: center; color: #24405c; }
+  #titleBest { font-weight: 800; color: #16324f; margin: 0 0 12px; font-size: 14px; }
+  #startHint {
+    font-weight: 900; font-size: 16px; letter-spacing: 0.08em;
+    color: #16324f; text-transform: uppercase;
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* level banner */
+  #banner {
+    position: fixed;
+    left: 0; right: 0;
+    top: 30%;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    pointer-events: none;
+    z-index: 9;
+    text-align: center;
+  }
+  #banner.visible { display: flex; }
+  #bannerMedal {
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    border: 6px solid #16324f;
+    box-shadow: 0 6px 0 rgba(22,50,79,0.4);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 44px;
+    animation: pop 0.5s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+  }
+  @keyframes pop { from { transform: scale(0.1) rotate(-40deg); } to { transform: scale(1) rotate(0deg); } }
+  #bannerTitle {
+    font-size: clamp(26px, 8vw, 40px);
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    color: #fff;
+    text-shadow: 3px 3px 0 #16324f;
+  }
+  #bannerSub {
+    font-size: 15px; font-weight: 800; letter-spacing: 0.08em;
+    color: #fff; text-shadow: 2px 2px 0 #16324f;
+  }
+
+  /* fall message */
+  #fallMsg {
+    position: fixed; left: 0; right: 0; top: 34%;
+    display: none; text-align: center; pointer-events: none; z-index: 9;
+    font-size: clamp(24px, 7vw, 36px); font-weight: 900; letter-spacing: 0.05em;
+    color: #fff; text-shadow: 3px 3px 0 #16324f;
+  }
+  #fallMsg.visible { display: block; }
+
+  /* touch hints */
+  #touchHints {
+    position: fixed; inset: 0;
+    display: none;
+    pointer-events: none;
+    z-index: 4;
+  }
+  #touchHints.visible { display: block; }
+  #touchHints div {
+    position: absolute;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+    font-size: 12px; font-weight: 800; letter-spacing: 0.08em;
+    color: #16324f;
+    background: rgba(255,255,255,0.62);
+    border-radius: 10px;
+    padding: 5px 11px;
+    text-transform: uppercase;
+  }
+  #hintL { left: calc(env(safe-area-inset-left, 0px) + 16px); }
+  #hintR { right: calc(env(safe-area-inset-right, 0px) + 16px); }
+
+  #tip {
+    position: fixed; left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 56px);
+    text-align: center; pointer-events: none; z-index: 6;
+    font-size: 14px; font-weight: 800; letter-spacing: 0.05em;
+    color: #16324f; text-shadow: 0 2px 0 rgba(255,255,255,0.8);
+    opacity: 0; transition: opacity 0.25s;
+  }
+  #tip.visible { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <div id="hudRow">
+    <div class="chip" id="lvlChip">LEVEL 1</div>
+    <div class="chip" id="timeChip">0.0</div>
+    <div class="chip" id="bestChip">BEST 0</div>
+  </div>
+  <div id="medals"></div>
+</div>
+
+<button id="muteBtn" type="button" aria-label="Mute">&#128266;</button>
+
+<div id="touchHints">
+  <div id="hintL">Hold to run</div>
+  <div id="hintR">Tap to jump / grab</div>
+</div>
+
+<div id="tip"></div>
+
+<div id="banner">
+  <div id="bannerMedal">&#127942;</div>
+  <div id="bannerTitle">PODIUM!</div>
+  <div id="bannerSub">GOLD &middot; 12.4s</div>
+</div>
+
+<div id="fallMsg">WHOOPS!</div>
+
+<div id="title" class="overlay visible">
+  <div id="titleCard">
+    <h1>Ninja&nbsp;Adventure</h1>
+    <p class="by">Designed by Gemma</p>
+    <p class="blurb">Run the floating obstacle course. Jump the gaps, swing the ropes, cross the monkey bars &mdash; and land on the podium for a medal. Then do it again, harder.</p>
+    <div class="keys">
+      <b>W / &uarr;</b><span>Run forward (hold)</span>
+      <b>Space</b><span>Jump &middot; grab &middot; let go</span>
+      <b>M</b><span>Mute / unmute</span>
+      <b>Touch</b><span>Hold left half to run, tap right half to jump</span>
+    </div>
+    <p id="titleBest">BEST RUN: 0 PODIUMS</p>
+    <div id="startHint">Press anything to start</div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": { "three": "./three.module.min.js" } }
+</script>
+
+<script type="module">
+import * as THREE from "three";
+
+// =============================================================================
+// constants
+// =============================================================================
+var GRAVITY      = 26;      // units / s^2
+var RUN_SPEED    = 7.2;     // units / s
+var JUMP_V       = 11.5;    // units / s
+var AIR_ACCEL    = 26;      // units / s^2 toward RUN_SPEED while holding forward
+var AIR_DRAG     = 1.2;     // units / s^2 when not holding forward
+var COYOTE       = 0.13;    // s of grace after leaving a ledge
+var JUMP_BUFFER  = 0.16;    // s a jump press stays queued
+var MAX_FALL     = 34;      // terminal velocity
+var HAND_H       = 1.95;    // height of the hands above the feet when reaching
+var EDGE_GRACE   = 0.38;    // forgiving landing overhang
+var FALL_LIMIT   = 17;      // units below the spawn before it counts as a fall
+var FLIP_SPEED   = 11.4;    // rad / s (about 1.6 flips per full jump)
+var CLIMB_SPEED  = 3.6;
+var RAIL_SPEED   = 4.4;
+var RELEASE_LOCK = 0.42;    // s before the player can grab again
+var PEND_DAMP    = 0.12;
+var PUMP         = 2.2;
+
+var PALETTE = [0xff2e88, 0xa3ff12, 0x00e0ff, 0xff8a00, 0x9b5cff,
+               0xffe200, 0x00ff9d, 0xff4d4d, 0x37f0c2, 0xff66cc];
+
+var SKY_TOP = 0x2f8ede;
+var SKY_BOT = 0xc8f0ff;
+var FOG_COL = 0x9fdcff;
+
+var TITLE = 0, PLAYING = 1, CELEBRATE = 2, FALLING = 3;
+
+// =============================================================================
+// small helpers
+// =============================================================================
+function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function rand(a, b) { return a + Math.random() * (b - a); }
+function pickColor() { return PALETTE[(Math.random() * PALETTE.length) | 0]; }
+function damp(a, b, lambda, dt) { return lerp(a, b, 1 - Math.exp(-lambda * dt)); }
+
+function storeGet(k, d) {
+  try { var v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; }
+}
+function storeSet(k, v) {
+  try { localStorage.setItem(k, v); } catch (e) {}
+}
+
+// =============================================================================
+// audio - chiptune via Web Audio, only started after a user gesture
+// =============================================================================
+var audio = {
+  ctx: null, master: null, musicGain: null, sfxGain: null,
+  muted: storeGet("ninja.muted", "0") === "1",
+  playing: false, step: 0, nextTime: 0
+};
+
+var STEP_DUR = 0.125;
+// two 16 step bars that alternate, giving a 32 step loop
+var BASS = [
+  40, 0, 40, 0, 47, 0, 40, 0, 45, 0, 45, 0, 43, 0, 43, 0,
+  38, 0, 38, 0, 45, 0, 38, 0, 43, 0, 43, 0, 47, 0, 47, 0
+];
+var LEAD = [
+  76, 0, 79, 0, 83, 0, 79, 0, 81, 0, 0, 79, 76, 0, 0, 0,
+  74, 0, 78, 0, 81, 0, 78, 0, 83, 0, 0, 81, 79, 0, 76, 0
+];
+
+function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+function initAudio() {
+  if (audio.ctx) {
+    if (audio.ctx.state === "suspended") audio.ctx.resume();
+    return;
+  }
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  try { audio.ctx = new AC(); } catch (e) { audio.ctx = null; return; }
+
+  audio.master = audio.ctx.createGain();
+  audio.master.gain.value = audio.muted ? 0 : 1;
+  audio.master.connect(audio.ctx.destination);
+
+  audio.musicGain = audio.ctx.createGain();
+  audio.musicGain.gain.value = 0.3;
+  audio.musicGain.connect(audio.master);
+
+  audio.sfxGain = audio.ctx.createGain();
+  audio.sfxGain.gain.value = 0.6;
+  audio.sfxGain.connect(audio.master);
+
+  if (audio.ctx.state === "suspended") audio.ctx.resume();
+}
+
+function applyMute() {
+  if (audio.master) audio.master.gain.value = audio.muted ? 0 : 1;
+  storeSet("ninja.muted", audio.muted ? "1" : "0");
+  muteBtn.innerHTML = audio.muted ? "&#128263;" : "&#128266;";
+  muteBtn.setAttribute("aria-label", audio.muted ? "Unmute" : "Mute");
+}
+
+function tone(freq, start, dur, type, peak, dest, endFreq) {
+  if (!audio.ctx) return;
+  var o = audio.ctx.createOscillator();
+  var g = audio.ctx.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, start);
+  if (endFreq) o.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), start + dur);
+  g.gain.setValueAtTime(0.0001, start);
+  g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  o.connect(g);
+  g.connect(dest || audio.sfxGain);
+  o.start(start);
+  o.stop(start + dur + 0.04);
+}
+
+function noise(start, dur, f0, f1, peak) {
+  if (!audio.ctx) return;
+  var len = Math.max(1, Math.floor(audio.ctx.sampleRate * dur));
+  var buf = audio.ctx.createBuffer(1, len, audio.ctx.sampleRate);
+  var d = buf.getChannelData(0);
+  for (var i = 0; i < len; i++) {
+    var k = 1 - i / len;
+    d[i] = (Math.random() * 2 - 1) * k;
+  }
+  var src = audio.ctx.createBufferSource();
+  src.buffer = buf;
+  var f = audio.ctx.createBiquadFilter();
+  f.type = "bandpass";
+  f.Q.value = 1.1;
+  f.frequency.setValueAtTime(f0, start);
+  f.frequency.exponentialRampToValueAtTime(Math.max(40, f1), start + dur);
+  var g = audio.ctx.createGain();
+  g.gain.setValueAtTime(peak, start);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+  src.connect(f); f.connect(g); g.connect(audio.sfxGain);
+  src.start(start);
+  src.stop(start + dur + 0.02);
+}
+
+function startMusic() {
+  if (!audio.ctx) return;
+  audio.playing = true;
+  audio.step = 0;
+  audio.nextTime = audio.ctx.currentTime + 0.08;
+}
+
+function pumpMusic() {
+  if (!audio.ctx || !audio.playing) return;
+  var now = audio.ctx.currentTime;
+  if (audio.nextTime < now) audio.nextTime = now + 0.02;
+  var guard = 0;
+  while (audio.nextTime < now + 0.3 && guard++ < 96) {
+    var i = audio.step % 32;
+    var b = BASS[i];
+    if (b) tone(mtof(b), audio.nextTime, 0.16, "square", 0.11, audio.musicGain);
+    var l = LEAD[i];
+    if (l) tone(mtof(l), audio.nextTime, 0.15, "triangle", 0.085, audio.musicGain);
+    if (i % 4 === 0) noiseHat(audio.nextTime, 0.035, 0.02);
+    else if (i % 2 === 0) noiseHat(audio.nextTime, 0.022, 0.009);
+    audio.nextTime += STEP_DUR;
+    audio.step++;
+  }
+}
+
+function noiseHat(t, dur, peak) {
+  if (!audio.ctx) return;
+  tone(7400, t, dur, "square", peak, audio.musicGain);
+}
+
+function sfxJump()  { if (audio.ctx) tone(420, audio.ctx.currentTime, 0.15, "square", 0.15, null, 860); }
+function sfxLand()  { if (audio.ctx) tone(150, audio.ctx.currentTime, 0.09, "sine", 0.2, null, 70); }
+function sfxGrab()  { if (audio.ctx) { var t = audio.ctx.currentTime; tone(240, t, 0.07, "square", 0.18); tone(360, t + 0.03, 0.07, "square", 0.12); } }
+function sfxWhoosh(){ if (audio.ctx) noise(audio.ctx.currentTime, 0.3, 500, 2600, 0.2); }
+function sfxStep()  { if (audio.ctx) noise(audio.ctx.currentTime, 0.05, 900, 400, 0.05); }
+
+function sfxFall() {
+  if (!audio.ctx) return;
+  var t0 = audio.ctx.currentTime;
+  var o = audio.ctx.createOscillator();
+  var g = audio.ctx.createGain();
+  var lfo = audio.ctx.createOscillator();
+  var lg = audio.ctx.createGain();
+  o.type = "sine";
+  o.frequency.setValueAtTime(1250, t0);
+  o.frequency.exponentialRampToValueAtTime(160, t0 + 1.05);
+  lfo.type = "sine"; lfo.frequency.value = 7;
+  lg.gain.value = 40;
+  lfo.connect(lg); lg.connect(o.frequency);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.04);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.15);
+  o.connect(g); g.connect(audio.sfxGain);
+  o.start(t0); o.stop(t0 + 1.2);
+  lfo.start(t0); lfo.stop(t0 + 1.2);
+}
+
+var FANFARE = {
+  gold:   { notes: [72, 76, 79, 84, 79, 84, 88], step: 0.11, dur: 0.34, type: "square", peak: 0.2 },
+  silver: { notes: [69, 73, 76, 81, 81],         step: 0.12, dur: 0.3,  type: "square", peak: 0.17 },
+  bronze: { notes: [65, 69, 72, 72],             step: 0.14, dur: 0.28, type: "triangle", peak: 0.17 }
+};
+
+function sfxMedal(kind) {
+  if (!audio.ctx) return;
+  var f = FANFARE[kind] || FANFARE.bronze;
+  var t0 = audio.ctx.currentTime;
+  for (var i = 0; i < f.notes.length; i++) {
+    tone(mtof(f.notes[i]), t0 + i * f.step, f.dur, f.type, f.peak);
+    tone(mtof(f.notes[i] - 12), t0 + i * f.step, f.dur, "triangle", f.peak * 0.5);
+  }
+  noise(t0, 0.5, 4000, 900, 0.09);
+}
+
+// =============================================================================
+// renderer, scene, camera
+// =============================================================================
+var renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.35;
+document.body.appendChild(renderer.domElement);
+
+var scene = new THREE.Scene();
+scene.fog = new THREE.Fog(FOG_COL, 55, 195);
+
+var camera = new THREE.PerspectiveCamera(58, 1, 0.1, 900);
+camera.position.set(0, 4, -8);
+
+var hemi = new THREE.HemisphereLight(0xdff3ff, 0x6ba8d0, 1.2);
+scene.add(hemi);
+
+var sun = new THREE.DirectionalLight(0xfff6dd, 1.55);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 60;
+sun.shadow.camera.left = -14;
+sun.shadow.camera.right = 14;
+sun.shadow.camera.top = 16;
+sun.shadow.camera.bottom = -16;
+sun.shadow.bias = -0.0015;
+sun.shadow.normalBias = 0.03;
+scene.add(sun);
+scene.add(sun.target);
+
+// -------- shared geometry + material caches --------
+var GEO = {
+  box:  new THREE.BoxGeometry(1, 1, 1),
+  cyl:  new THREE.CylinderGeometry(1, 1, 1, 10),
+  ico:  new THREE.IcosahedronGeometry(1, 1),
+  sph:  new THREE.SphereGeometry(1, 14, 10),
+  oct:  new THREE.OctahedronGeometry(1, 0)
+};
+
+var matCache = new Map();
+function mat(hex) {
+  var m = matCache.get(hex);
+  if (!m) {
+    m = new THREE.MeshLambertMaterial({ color: hex });
+    matCache.set(hex, m);
+  }
+  return m;
+}
+
+var tmpColor = new THREE.Color();
+function shade(hex, k) {
+  tmpColor.setHex(hex);
+  tmpColor.multiplyScalar(k);
+  return tmpColor.getHex();
+}
+
+function box(parent, x, y, z, w, h, d, hex, shadowCast) {
+  var m = new THREE.Mesh(GEO.box, mat(hex));
+  m.position.set(x, y, z);
+  m.scale.set(w, h, d);
+  m.receiveShadow = true;
+  if (shadowCast) m.castShadow = true;
+  parent.add(m);
+  return m;
+}
+
+// cylinder along Y by default; axis "x" or "z" rotates it
+function tube(parent, x, y, z, r, len, hex, axis) {
+  var m = new THREE.Mesh(GEO.cyl, mat(hex));
+  m.position.set(x, y, z);
+  m.scale.set(r, len, r);
+  if (axis === "x") m.rotation.z = Math.PI / 2;
+  else if (axis === "z") m.rotation.x = Math.PI / 2;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+
+// =============================================================================
+// sky, sun disc, clouds
+// =============================================================================
+var skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  depthWrite: false,
+  fog: false,
+  uniforms: {
+    topCol: { value: new THREE.Color(SKY_TOP) },
+    midCol: { value: new THREE.Color(0x7fc8f0) },
+    botCol: { value: new THREE.Color(SKY_BOT) },
+    sunDir: { value: new THREE.Vector3(-0.42, 0.62, 0.66).normalize() }
+  },
+  vertexShader: [
+    "varying vec3 vDir;",
+    "void main() {",
+    "  vDir = normalize(position);",
+    "  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);",
+    "}"
+  ].join("\n"),
+  fragmentShader: [
+    "uniform vec3 topCol;",
+    "uniform vec3 midCol;",
+    "uniform vec3 botCol;",
+    "uniform vec3 sunDir;",
+    "varying vec3 vDir;",
+    "void main() {",
+    "  vec3 d = normalize(vDir);",
+    "  float h = clamp(d.y * 0.6 + 0.42, 0.0, 1.0);",
+    "  h = pow(h, 0.85);",
+    "  vec3 col = mix(midCol, topCol, smoothstep(0.4, 1.0, h));",
+    "  col = mix(botCol, col, smoothstep(0.0, 0.5, h));",
+    "  float s = pow(clamp(dot(d, sunDir), 0.0, 1.0), 6.0);",
+    "  col += vec3(1.0, 0.82, 0.5) * s * 0.3;",
+    "  gl_FragColor = vec4(col, 1.0);",
+    "  #include <colorspace_fragment>",
+    "}"
+  ].join("\n")
+});
+var skyMesh = new THREE.Mesh(new THREE.SphereGeometry(600, 20, 14), skyMat);
+skyMesh.frustumCulled = false;
+skyMesh.renderOrder = -1000;
+scene.add(skyMesh);
+
+// a friendly sun disc, parented to the sky so it always sits far away
+var sunDisc = new THREE.Mesh(GEO.sph, new THREE.MeshBasicMaterial({ color: 0xfff4b0, fog: false }));
+sunDisc.scale.setScalar(26);
+sunDisc.frustumCulled = false;
+sunDisc.renderOrder = -999;
+scene.add(sunDisc);
+var sunGlow = new THREE.Mesh(GEO.sph, new THREE.MeshBasicMaterial({
+  color: 0xfff0a0, fog: false, transparent: true, opacity: 0.26, depthWrite: false
+}));
+sunGlow.scale.setScalar(46);
+sunGlow.frustumCulled = false;
+sunGlow.renderOrder = -998;
+scene.add(sunGlow);
+var SUN_DIR = new THREE.Vector3(-0.42, 0.62, 0.66).normalize();
+
+// clouds: one InstancedMesh of puffs, recycled as the player advances
+var CLOUD_N = 46, PUFFS = 4;
+var cloudMesh = new THREE.InstancedMesh(GEO.ico, new THREE.MeshLambertMaterial({ color: 0xffffff }), CLOUD_N * PUFFS);
+cloudMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+cloudMesh.frustumCulled = false;
+scene.add(cloudMesh);
+var cloudZ = new Float32Array(CLOUD_N);
+var cloudObj = new THREE.Object3D();
+var CLOUD_SPAN = 260;
+
+function placeCloud(i, z) {
+  cloudZ[i] = z;
+  var below = Math.random() < 0.55;
+  var cy = below ? rand(-34, -11) : rand(11, 34);
+  var cx = (Math.random() < 0.5 ? -1 : 1) * rand(14, 78);
+  var s = rand(2.4, 5.6);
+  for (var p = 0; p < PUFFS; p++) {
+    cloudObj.position.set(
+      cx + rand(-s * 1.15, s * 1.15),
+      cy + rand(-s * 0.24, s * 0.24),
+      z + rand(-s * 0.9, s * 0.9)
+    );
+    cloudObj.rotation.set(rand(0, 3.14), rand(0, 3.14), rand(0, 3.14));
+    cloudObj.scale.setScalar(s * rand(0.6, 1.05));
+    cloudObj.updateMatrix();
+    cloudMesh.setMatrixAt(i * PUFFS + p, cloudObj.matrix);
+  }
+}
+function initClouds(centerZ) {
+  for (var i = 0; i < CLOUD_N; i++) placeCloud(i, centerZ + rand(-CLOUD_SPAN * 0.4, CLOUD_SPAN * 0.6));
+  cloudMesh.instanceMatrix.needsUpdate = true;
+}
+function updateClouds(z) {
+  var dirty = false;
+  for (var i = 0; i < CLOUD_N; i++) {
+    if (cloudZ[i] < z - CLOUD_SPAN * 0.35) { placeCloud(i, cloudZ[i] + CLOUD_SPAN); dirty = true; }
+    else if (cloudZ[i] > z + CLOUD_SPAN * 0.75) { placeCloud(i, cloudZ[i] - CLOUD_SPAN); dirty = true; }
+  }
+  if (dirty) cloudMesh.instanceMatrix.needsUpdate = true;
+}
+
+// distant hot air balloons give the sky some depth
+var balloons = [];
+(function initBalloonMeshes() {
+  for (var bi = 0; bi < 6; bi++) {
+    var bg = new THREE.Group();
+    var hex = PALETTE[(bi * 3 + 1) % PALETTE.length];
+    var env = new THREE.Mesh(GEO.sph, mat(hex));
+    env.scale.set(1.6, 1.85, 1.6);
+    bg.add(env);
+    var band = new THREE.Mesh(GEO.sph, mat(shade(hex, 0.6)));
+    band.scale.set(1.62, 0.5, 1.62);
+    band.position.y = -0.72;
+    bg.add(band);
+    box(bg, 0, -2.6, 0, 0.75, 0.6, 0.75, 0x9a6a3a);
+    tube(bg, -0.45, -1.95, 0, 0.035, 1.0, 0x6b4a28);
+    tube(bg,  0.45, -1.95, 0, 0.035, 1.0, 0x6b4a28);
+    bg.traverse(function (o) { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } });
+    scene.add(bg);
+    balloons.push({ g: bg, z: -9999, x: 0, y: 0, phase: rand(0, 6.28) });
+  }
+})();
+
+function placeBalloon(b, z) {
+  b.z = z;
+  b.x = (Math.random() < 0.5 ? -1 : 1) * rand(18, 55);
+  b.y = rand(-6, 20);
+  b.g.scale.setScalar(rand(0.9, 1.7));
+}
+function initBalloons(centerZ) {
+  for (var i = 0; i < balloons.length; i++) placeBalloon(balloons[i], centerZ + rand(-30, 190));
+}
+function updateBalloons(now, z) {
+  for (var i = 0; i < balloons.length; i++) {
+    var b = balloons[i];
+    if (b.z < z - 60) placeBalloon(b, z + rand(120, 220));
+    b.g.position.set(b.x, b.y + Math.sin(now * 0.0005 + b.phase) * 1.2, b.z);
+  }
+}
+
+// =============================================================================
+// confetti
+// =============================================================================
+var CONF_N = 170;
+var confMesh = new THREE.InstancedMesh(GEO.box, new THREE.MeshLambertMaterial({ color: 0xffffff }), CONF_N);
+confMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+confMesh.frustumCulled = false;
+scene.add(confMesh);
+var confP = new Float32Array(CONF_N * 3);
+var confV = new Float32Array(CONF_N * 3);
+var confR = new Float32Array(CONF_N * 3);
+var confW = new Float32Array(CONF_N * 3);
+var confLife = new Float32Array(CONF_N);
+var confObj = new THREE.Object3D();
+var confActive = false;
+
+(function initConfetti() {
+  var c = new THREE.Color();
+  for (var i = 0; i < CONF_N; i++) {
+    c.setHex(PALETTE[i % PALETTE.length]);
+    confMesh.setColorAt(i, c);
+    confObj.position.set(0, -9999, 0);
+    confObj.scale.setScalar(0.001);
+    confObj.updateMatrix();
+    confMesh.setMatrixAt(i, confObj.matrix);
+  }
+  if (confMesh.instanceColor) confMesh.instanceColor.needsUpdate = true;
+  confMesh.instanceMatrix.needsUpdate = true;
+})();
+
+function burstConfetti(x, y, z) {
+  for (var i = 0; i < CONF_N; i++) {
+    var a = Math.random() * Math.PI * 2;
+    var sp = rand(2.5, 9.5);
+    confP[i * 3] = x + rand(-1.2, 1.2);
+    confP[i * 3 + 1] = y + rand(0, 1.2);
+    confP[i * 3 + 2] = z + rand(-1.2, 1.2);
+    confV[i * 3] = Math.cos(a) * sp * 0.55;
+    confV[i * 3 + 1] = rand(6, 13);
+    confV[i * 3 + 2] = Math.sin(a) * sp * 0.55;
+    confR[i * 3] = rand(0, 6.28); confR[i * 3 + 1] = rand(0, 6.28); confR[i * 3 + 2] = rand(0, 6.28);
+    confW[i * 3] = rand(-9, 9); confW[i * 3 + 1] = rand(-9, 9); confW[i * 3 + 2] = rand(-9, 9);
+    confLife[i] = rand(2.2, 3.6);
+  }
+  confActive = true;
+}
+
+function updateConfetti(dt) {
+  if (!confActive) return;
+  var any = false;
+  for (var i = 0; i < CONF_N; i++) {
+    if (confLife[i] <= 0) {
+      confObj.position.set(0, -9999, 0);
+      confObj.scale.setScalar(0.001);
+      confObj.updateMatrix();
+      confMesh.setMatrixAt(i, confObj.matrix);
+      continue;
+    }
+    any = true;
+    confLife[i] -= dt;
+    confV[i * 3 + 1] -= 13 * dt;
+    confV[i * 3] *= 0.985;
+    confV[i * 3 + 2] *= 0.985;
+    confP[i * 3] += confV[i * 3] * dt;
+    confP[i * 3 + 1] += confV[i * 3 + 1] * dt;
+    confP[i * 3 + 2] += confV[i * 3 + 2] * dt;
+    confR[i * 3] += confW[i * 3] * dt;
+    confR[i * 3 + 1] += confW[i * 3 + 1] * dt;
+    confR[i * 3 + 2] += confW[i * 3 + 2] * dt;
+    confObj.position.set(confP[i * 3], confP[i * 3 + 1], confP[i * 3 + 2]);
+    confObj.rotation.set(confR[i * 3], confR[i * 3 + 1], confR[i * 3 + 2]);
+    confObj.scale.set(0.24, 0.24, 0.06);
+    confObj.updateMatrix();
+    confMesh.setMatrixAt(i, confObj.matrix);
+  }
+  confMesh.instanceMatrix.needsUpdate = true;
+  if (!any) confActive = false;
+}
+
+// =============================================================================
+// dust puffs for jumps, landings and footsteps
+// =============================================================================
+var DUST_N = 64;
+var dustMesh = new THREE.InstancedMesh(GEO.sph, new THREE.MeshLambertMaterial({ color: 0xf4fbff }), DUST_N);
+dustMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+dustMesh.frustumCulled = false;
+scene.add(dustMesh);
+var dustP = new Float32Array(DUST_N * 3);
+var dustV = new Float32Array(DUST_N * 3);
+var dustLife = new Float32Array(DUST_N);
+var dustMax = new Float32Array(DUST_N);
+var dustS = new Float32Array(DUST_N);
+var dustObj = new THREE.Object3D();
+var dustHead = 0, dustActive = false;
+
+(function initDust() {
+  for (var i = 0; i < DUST_N; i++) {
+    dustObj.position.set(0, -9999, 0);
+    dustObj.scale.setScalar(0.001);
+    dustObj.updateMatrix();
+    dustMesh.setMatrixAt(i, dustObj.matrix);
+  }
+  dustMesh.instanceMatrix.needsUpdate = true;
+})();
+
+function puff(x, y, z, n, spread, up) {
+  for (var k = 0; k < n; k++) {
+    var i = dustHead++ % DUST_N;
+    var a = Math.random() * Math.PI * 2;
+    dustP[i * 3] = x + Math.cos(a) * rand(0, spread);
+    dustP[i * 3 + 1] = y + rand(0, 0.15);
+    dustP[i * 3 + 2] = z + Math.sin(a) * rand(0, spread);
+    dustV[i * 3] = Math.cos(a) * rand(0.4, 1.6);
+    dustV[i * 3 + 1] = rand(0.4, up);
+    dustV[i * 3 + 2] = Math.sin(a) * rand(0.4, 1.6) - 0.5;
+    dustLife[i] = dustMax[i] = rand(0.28, 0.55);
+    dustS[i] = rand(0.09, 0.2);
+  }
+  dustActive = true;
+}
+
+function updateDust(dt) {
+  if (!dustActive) return;
+  var any = false;
+  for (var i = 0; i < DUST_N; i++) {
+    if (dustLife[i] <= 0) continue;
+    dustLife[i] -= dt;
+    if (dustLife[i] <= 0) {
+      dustObj.position.set(0, -9999, 0);
+      dustObj.scale.setScalar(0.001);
+      dustObj.updateMatrix();
+      dustMesh.setMatrixAt(i, dustObj.matrix);
+      continue;
+    }
+    any = true;
+    dustP[i * 3] += dustV[i * 3] * dt;
+    dustP[i * 3 + 1] += dustV[i * 3 + 1] * dt;
+    dustP[i * 3 + 2] += dustV[i * 3 + 2] * dt;
+    var k = dustLife[i] / dustMax[i];
+    dustObj.position.set(dustP[i * 3], dustP[i * 3 + 1], dustP[i * 3 + 2]);
+    dustObj.scale.setScalar(dustS[i] * (k * (1 - k) * 4 + 0.15));
+    dustObj.updateMatrix();
+    dustMesh.setMatrixAt(i, dustObj.matrix);
+  }
+  dustMesh.instanceMatrix.needsUpdate = true;
+  if (!any) dustActive = false;
+}
+
+// =============================================================================
+// the ninja
+// =============================================================================
+var SKIN = 0xffcf9e;
+var SHIRT = 0xff7a00;
+var PANTS = 0x2b4bd8;
+var BAND = 0xff2e88;
+
+function limb(parent, x, y, w, h, d, hex) {
+  var g = new THREE.Group();
+  g.position.set(x, y, 0);
+  var m = box(g, 0, -h / 2, 0, w, h, d, hex, true);
+  m.castShadow = true;
+  parent.add(g);
+  return g;
+}
+
+var player = {
+  z: 0, y: 0, vz: 0, vy: 0,
+  onGround: false, coyote: 0, jumpBuf: 0,
+  flip: 0, runPhase: 0, stepT: 0,
+  hang: null,          // active grab object
+  hangT: 0,
+  theta: 0, omega: 0,  // pendulum state
+  releaseLock: 0,
+  air: 0,
+  lastGroundY: 0       // the last solid surface, used to detect a fall
+};
+
+var ninja = new THREE.Group();
+var ninjaFlip = new THREE.Group();      // rotates for the somersault
+ninjaFlip.position.y = 1.0;
+ninja.add(ninjaFlip);
+var ninjaBody = new THREE.Group();      // feet back at y = 0
+ninjaBody.position.y = -1.0;
+ninjaFlip.add(ninjaBody);
+scene.add(ninja);
+
+var legL = limb(ninjaBody, -0.17, 0.74, 0.26, 0.74, 0.26, PANTS);
+var legR = limb(ninjaBody,  0.17, 0.74, 0.26, 0.74, 0.26, PANTS);
+box(legL, 0, -0.72, 0.06, 0.3, 0.16, 0.42, 0x18202e, true);
+box(legR, 0, -0.72, 0.06, 0.3, 0.16, 0.42, 0x18202e, true);
+
+box(ninjaBody, 0, 1.1, 0, 0.62, 0.76, 0.4, SHIRT, true);
+box(ninjaBody, 0, 0.78, 0, 0.66, 0.16, 0.44, 0x00e0ff, true);   // belt
+
+var armL = limb(ninjaBody, -0.42, 1.38, 0.2, 0.64, 0.2, SKIN);
+var armR = limb(ninjaBody,  0.42, 1.38, 0.2, 0.64, 0.2, SKIN);
+box(armL, 0, -0.14, 0, 0.24, 0.3, 0.24, SHIRT, true);           // sleeve
+box(armR, 0, -0.14, 0, 0.24, 0.3, 0.24, SHIRT, true);
+
+var head = new THREE.Group();
+head.position.y = 1.76;
+ninjaBody.add(head);
+box(head, 0, 0, 0, 0.52, 0.52, 0.5, SKIN, true);
+box(head, 0, 0.14, 0, 0.56, 0.16, 0.54, BAND, true);            // headband
+box(head, 0, 0.14, -0.32, 0.13, 0.11, 0.42, BAND, true);        // headband tail
+box(head, -0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false); // eyes
+box(head,  0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false);
+box(head, 0, 0.3, 0.02, 0.5, 0.14, 0.46, 0x25313f, true);       // hair top
+
+ninja.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
+
+var squashT = 0;   // seconds of landing squash left
+
+// a soft blob shadow marks the landing point below the ninja
+var blob = new THREE.Mesh(
+  new THREE.CircleGeometry(1, 22),
+  new THREE.MeshBasicMaterial({ color: 0x0e2440, transparent: true, opacity: 0.25, depthWrite: false })
+);
+blob.rotation.x = -Math.PI / 2;
+scene.add(blob);
+
+function updateBlob() {
+  var gy = -Infinity;
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    if (player.z < p.z0 - 0.2 || player.z > p.z1 + 0.2) continue;
+    if (p.y <= player.y + 0.05 && p.y > gy) gy = p.y;
+  }
+  if (gy === -Infinity) { blob.visible = false; return; }
+  var h = player.y - gy;
+  blob.visible = true;
+  blob.position.set(0, gy + 0.03, player.z);
+  blob.scale.setScalar(clamp(0.62 - h * 0.022, 0.3, 0.62));
+  blob.material.opacity = clamp(0.3 - h * 0.012, 0.1, 0.3);
+}
+
+// =============================================================================
+// course generation
+// =============================================================================
+var courses = [];
+var platforms = [];   // { z0, z1, y, isPodium }
+var grabs = [];       // { kind, ... }
+var blockers = [];    // { z0, z1, top }  - the podium step you must jump onto
+
+function rebuildWorldLists() {
+  platforms.length = 0;
+  grabs.length = 0;
+  blockers.length = 0;
+  for (var i = 0; i < courses.length; i++) {
+    var c = courses[i];
+    for (var j = 0; j < c.platforms.length; j++) platforms.push(c.platforms[j]);
+    for (var k = 0; k < c.grabs.length; k++) grabs.push(c.grabs[k]);
+    for (var b = 0; b < c.blockers.length; b++) blockers.push(c.blockers[b]);
+  }
+}
+
+function addPlatform(c, z0, z1, y, w, hex, isPodium) {
+  var g = c.group;
+  var len = z1 - z0;
+  var cz = (z0 + z1) / 2;
+  box(g, 0, y - 0.25, cz, w, 0.5, len, hex);                       // bright top slab
+  box(g, 0, y - 1.15, cz, w * 0.82, 1.3, len * 0.97, shade(hex, 0.55)); // chunky under body
+  // striped end caps make the jump edges easy to read
+  box(g, 0, y - 0.24, z1 - 0.28, w * 1.02, 0.56, 0.56, 0x16324f);
+  box(g, 0, y - 0.24, z0 + 0.28, w * 1.02, 0.56, 0.56, 0x16324f);
+  if (len > 5.5) addBunting(c, z0 + 0.6, z1 - 0.6, y, w);
+  var p = { z0: z0, z1: z1, y: y, isPodium: !!isPodium };
+  c.platforms.push(p);
+  return p;
+}
+
+// bunting: one merged, vertex coloured triangle strip down each side of a platform
+function addBunting(c, z0, z1, y, w) {
+  var pos = c.bunt.pos, col = c.bunt.col;
+  var seg = 1.15;
+  var n = Math.max(2, Math.floor((z1 - z0) / seg));
+  var step = (z1 - z0) / n;
+  var top = y + 3.1;
+  var col3 = new THREE.Color();
+  for (var side = -1; side <= 1; side += 2) {
+    var x = side * (w / 2 + 0.35);
+    for (var i = 0; i < n; i++) {
+      var za = z0 + i * step, zb = za + step;
+      var sag = 0.34;
+      pos.push(x, top, za, x, top, zb, x, top - sag - 0.62, (za + zb) / 2);
+      col3.setHex(PALETTE[(i + (side > 0 ? 3 : 0)) % PALETTE.length]);
+      for (var v = 0; v < 3; v++) col.push(col3.r, col3.g, col3.b);
+    }
+  }
+}
+
+function finishBunting(c) {
+  if (!c.bunt.pos.length) return;
+  var g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(c.bunt.pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(c.bunt.col, 3));
+  g.computeBoundingSphere();
+  var m = new THREE.Mesh(g, buntMat);
+  m.frustumCulled = true;
+  c.group.add(m);
+  c.geos.push(g);
+}
+var buntMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+var starMat = new THREE.MeshLambertMaterial({ color: 0xffe200, emissive: 0x8a6a00 });
+
+// ---- obstacle builders. Each returns the new { z, y } cursor. ----
+
+function buildGap(c, z, y, d) {
+  var gap = 2.2 + d * 2.6 + rand(0, 0.6);
+  var ny = y + (Math.random() - 0.38) * 1.6 * d;
+  var len = 7.5 - d * 3.6 + rand(0, 2);
+  addPlatform(c, z + gap, z + gap + len, ny, Math.max(2.2, 3.4 - d * 1.2), pickColor());
+  c.est += 1.15 + len / RUN_SPEED;
+  return { z: z + gap + len, y: ny };
+}
+
+function buildRail(c, z, y, d) {
+  var gap = 1.9 + d * 0.7;
+  var railLen = 6 + d * 6 + rand(0, 3);
+  var barY = y + 3.1;
+  var z0 = z + gap, z1 = z0 + railLen;
+  var hex = pickColor();
+  var frame = shade(hex, 0.5);
+  // two side rails + rungs
+  tube(c.group, -1.5, barY + 0.22, (z0 + z1) / 2, 0.11, railLen, frame, "z");
+  tube(c.group,  1.5, barY + 0.22, (z0 + z1) / 2, 0.11, railLen, frame, "z");
+  var rungs = Math.max(2, Math.round(railLen / 1.15));
+  for (var i = 0; i <= rungs; i++) {
+    tube(c.group, 0, barY, z0 + (railLen * i) / rungs, 0.1, 3.0, PALETTE[i % PALETTE.length], "x");
+  }
+  // support posts at each end
+  tube(c.group, -1.5, barY + 1.0, z0, 0.13, 1.6, frame);
+  tube(c.group,  1.5, barY + 1.0, z0, 0.13, 1.6, frame);
+  tube(c.group, -1.5, barY + 1.0, z1, 0.13, 1.6, frame);
+  tube(c.group,  1.5, barY + 1.0, z1, 0.13, 1.6, frame);
+  c.grabs.push({ kind: "rail", z0: z0, z1: z1, y: barY });
+
+  var lz = z1 + 1.8;
+  var len = 7 - d * 2.6 + rand(0, 2);
+  addPlatform(c, lz, lz + len, y, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 1.4 + railLen / RAIL_SPEED + len / RUN_SPEED;
+  return { z: lz + len, y: y };
+}
+
+function buildSwing(c, z, y, d) {
+  var n = 1 + (d > 0.42 ? 1 : 0) + (d > 0.82 ? 1 : 0);
+  var spacing = 5.0 + d * 0.8;
+  var anchorY = y + 5.0;
+  var ropeLen = 3.0;
+  var hex = pickColor();
+  // the beam the ropes hang from
+  var beamZ0 = z + 1.6, beamZ1 = z + 2.4 + (n - 1) * spacing + 1.6;
+  tube(c.group, 0, anchorY + 0.35, (beamZ0 + beamZ1) / 2, 0.16, beamZ1 - beamZ0, shade(hex, 0.5), "z");
+  for (var i = 0; i < n; i++) {
+    var rz = z + 2.4 + i * spacing;
+    var pivot = new THREE.Group();
+    pivot.position.set(0, anchorY, rz);
+    c.group.add(pivot);
+    var rc = PALETTE[(i * 3 + 1) % PALETTE.length];
+    tube(pivot, 0, -ropeLen / 2, 0, 0.075, ropeLen, 0xf0e2c0);   // rope
+    box(pivot, 0, -ropeLen - 0.16, 0, 0.9, 0.32, 0.32, rc);      // fat handle
+    box(pivot, 0, -ropeLen * 0.55, 0, 0.24, 0.5, 0.24, rc);      // colour knot
+    c.grabs.push({ kind: "pend", pz: rz, py: anchorY, ropeLen: ropeLen, len: ropeLen + HAND_H, node: pivot, swing: true });
+  }
+  var lastZ = z + 2.4 + (n - 1) * spacing;
+  var lz = lastZ + 5.6 + d * 0.8;
+  var len = 7 - d * 2.4 + rand(0, 2);
+  addPlatform(c, lz, lz + len, y, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 1.6 + n * 2.3 + len / RUN_SPEED;
+  return { z: lz + len, y: y };
+}
+
+function buildLache(c, z, y, d) {
+  var n = 2 + (d > 0.35 ? 1 : 0) + (d > 0.75 ? 1 : 0);
+  var spacing = 3.8 + d * 1.0;
+  var barY = y + 3.2;
+  var hex = pickColor();
+  for (var i = 0; i < n; i++) {
+    var bz = z + 2.3 + i * spacing;
+    var bc = PALETTE[(i * 2 + 4) % PALETTE.length];
+    tube(c.group, 0, barY, bz, 0.11, 3.0, bc, "x");
+    // uprights that hold the bar
+    tube(c.group, -1.45, barY + 1.1, bz, 0.12, 2.2, shade(hex, 0.5));
+    tube(c.group,  1.45, barY + 1.1, bz, 0.12, 2.2, shade(hex, 0.5));
+    box(c.group, -1.45, barY + 2.24, bz, 0.4, 0.28, 0.4, bc);
+    box(c.group,  1.45, barY + 2.24, bz, 0.4, 0.28, 0.4, bc);
+    c.grabs.push({ kind: "pend", pz: bz, py: barY, ropeLen: 0, len: HAND_H, node: null, swing: false });
+  }
+  var lastZ = z + 2.3 + (n - 1) * spacing;
+  var lz = lastZ + 3.4;
+  var len = 7 - d * 2.4 + rand(0, 2);
+  addPlatform(c, lz, lz + len, y, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 1.4 + n * 1.7 + len / RUN_SPEED;
+  return { z: lz + len, y: y };
+}
+
+function buildClimb(c, z, y, d) {
+  var rise = 3.0 + d * 2.6;
+  var rz = z + 2.6;
+  var yTop = y + rise + 2.4;
+  var yBot = y + 0.2;
+  var hex = pickColor();
+  // gantry
+  tube(c.group, -1.7, (y + yTop + 0.6) / 2, rz, 0.15, yTop + 0.6 - y, shade(hex, 0.5));
+  tube(c.group,  1.7, (y + yTop + 0.6) / 2, rz, 0.15, yTop + 0.6 - y, shade(hex, 0.5));
+  tube(c.group, 0, yTop + 0.4, rz, 0.15, 3.6, hex, "x");
+  // the rope, with colourful knots along it
+  tube(c.group, 0, (yTop + yBot) / 2, rz, 0.085, yTop - yBot, 0xf0e2c0);
+  var knots = Math.max(2, Math.round((yTop - yBot) / 1.1));
+  for (var i = 0; i <= knots; i++) {
+    box(c.group, 0, yBot + ((yTop - yBot) * i) / knots, rz, 0.34, 0.2, 0.34, PALETTE[i % PALETTE.length]);
+  }
+  c.grabs.push({ kind: "climb", z: rz, y0: yBot, y1: yTop });
+
+  var lz = rz + 2.0;
+  var len = 7.5 - d * 2.4 + rand(0, 2);
+  addPlatform(c, lz, lz + len, y + rise, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 2.4 + rise / CLIMB_SPEED + len / RUN_SPEED;
+  return { z: lz + len, y: y + rise };
+}
+
+// ---- the podium ----
+function buildPodium(c, z, y) {
+  var g = c.group;
+  var pz = z + 3.2;                     // centre of the gold block
+  var baseY = y;
+  var goldTop = baseY + 2.2;
+
+  // base plate the player runs onto
+  addPlatform(c, z, pz + 1.1, baseY, 8, 0x2f7fd0);
+  // the three steps (2nd, 1st, 3rd) sitting on the plate
+  box(g, -2.7, baseY + 0.8, pz, 2.3, 1.6, 2.2, 0xd8e2ec, true);   // silver
+  box(g,  2.7, baseY + 0.55, pz, 2.3, 1.1, 2.2, 0xd07a34, true);  // bronze
+  box(g,  0,   baseY + 1.1, pz, 2.3, 2.2, 2.2, 0xffcf2e, true);   // gold
+  box(g, -2.7, baseY + 1.63, pz, 2.42, 0.14, 2.32, 0xf6fbff);
+  box(g,  2.7, baseY + 1.13, pz, 2.42, 0.14, 2.32, 0xf0a666);
+  box(g,  0,   baseY + 2.23, pz, 2.42, 0.14, 2.32, 0xfff0a8);
+
+  // finish arch with a chequered banner
+  for (var s = -1; s <= 1; s += 2) {
+    tube(g, s * 4.4, baseY + 2.6, pz - 1.4, 0.18, 5.2, 0xff2e88);
+    box(g, s * 4.4, baseY + 5.3, pz - 1.4, 0.6, 0.6, 0.6, 0xffe200, true);
+  }
+  box(g, 0, baseY + 4.9, pz - 1.4, 8.8, 0.9, 0.24, 0x16324f);
+  for (var i = 0; i < 11; i++) {
+    box(g, -4.0 + i * 0.8, baseY + 4.9, pz - 1.35, 0.8, 0.42, 0.1, i % 2 ? 0xffffff : 0x16324f);
+    box(g, -4.0 + i * 0.8, baseY + 4.9 - 0.42, pz - 1.35, 0.8, 0.42, 0.1, i % 2 ? 0x16324f : 0xffffff);
+  }
+
+  // the gold top is the goal
+  c.platforms.push({ z0: pz - 1.15, z1: pz + 1.15, y: goldTop, isPodium: true });
+  // and the block itself stops you running straight through
+  c.blockers.push({ z0: pz - 1.15, z1: pz + 1.15, top: goldTop });
+
+  c.podium = { z: pz, y: goldTop, baseY: baseY };
+
+  // a spinning gold star marks the goal
+  var star = new THREE.Mesh(GEO.oct, starMat);
+  star.position.set(0, goldTop + 1.7, pz);
+  star.scale.setScalar(0.6);
+  g.add(star);
+  c.podium.star = star;
+  c.podium.starY = goldTop + 1.7;
+
+  return { z: pz + 1.1, y: goldTop };
+}
+
+var BUILDERS = { gap: buildGap, rail: buildRail, swing: buildSwing, lache: buildLache, climb: buildClimb };
+
+function generateCourse(index, startZ, startY) {
+  var d = clamp((index - 1) / 9, 0, 1);
+  var c = {
+    index: index, group: new THREE.Group(), platforms: [], grabs: [], blockers: [],
+    geos: [], bunt: { pos: [], col: [] }, est: 0, podium: null,
+    startZ: startZ, startY: startY, d: d
+  };
+  scene.add(c.group);
+
+  var z = startZ, y = startY;
+  var runLen = index === 1 ? 15 : 10;
+  addPlatform(c, z, z + runLen, y, 4.0, index === 1 ? 0x00e0ff : pickColor());
+  c.est += runLen / RUN_SPEED;
+  z += runLen;
+
+  // which obstacles are unlocked at this level
+  var bag = ["gap", "gap", "gap", "rail"];
+  if (index >= 2) bag.push("swing", "gap");
+  if (index >= 3) bag.push("lache", "climb", "swing");
+  if (index >= 5) bag.push("lache", "swing", "rail");
+
+  var n = Math.min(12, 5 + Math.floor((index - 1) * 0.8));
+  var last = "";
+  for (var i = 0; i < n; i++) {
+    var t = bag[(Math.random() * bag.length) | 0];
+    if (t === last && t !== "gap") t = "gap";   // avoid the same rig twice in a row
+    last = t;
+    var r = BUILDERS[t](c, z, y, d);
+    z = r.z; y = r.y;
+  }
+
+  // run up to the podium
+  addPlatform(c, z + 2.0 + d * 1.4, z + 2.0 + d * 1.4 + 7, y, 4.0, pickColor());
+  c.est += 1.2 + 7 / RUN_SPEED;
+  z = z + 2.0 + d * 1.4 + 7;
+  var end = buildPodium(c, z, y);
+
+  finishBunting(c);
+  // est is a generous walk-through estimate; par sits a little under it so a
+  // tidy run earns gold, a normal one silver, and a scrappy one bronze
+  c.parTime = c.est * 0.9 + 1.3;
+  c.endZ = end.z;
+  c.endY = end.y;
+  c.spawn = { z: startZ + 2.0, y: startY };
+  return c;
+}
+
+// geometries and materials are shared, so only the per course merged bunting
+// buffer actually needs freeing
+function disposeCourse(c) {
+  scene.remove(c.group);
+  for (var i = 0; i < c.geos.length; i++) c.geos[i].dispose();
+  c.geos.length = 0;
+  c.group.clear();
+  c.platforms.length = 0;
+  c.grabs.length = 0;
+  c.blockers.length = 0;
+}
+
+// =============================================================================
+// game state
+// =============================================================================
+var state = TITLE;
+var level = 1;
+var podiums = 0;
+var best = parseInt(storeGet("ninja.best", "0"), 10) || 0;
+if (!isFinite(best) || best < 0) best = 0;
+var medals = [];
+var levelTime = 0;
+var celebrateT = 0;
+var fallT = 0;
+var spawn = { z: 2, y: 0 };
+var current = null;    // the course being played
+var tipT = 0;
+
+var hudEl = document.getElementById("hud");
+var lvlChip = document.getElementById("lvlChip");
+var timeChip = document.getElementById("timeChip");
+var bestChip = document.getElementById("bestChip");
+var medalsEl = document.getElementById("medals");
+var muteBtn = document.getElementById("muteBtn");
+var titleEl = document.getElementById("title");
+var titleBest = document.getElementById("titleBest");
+var bannerEl = document.getElementById("banner");
+var bannerMedal = document.getElementById("bannerMedal");
+var bannerTitle = document.getElementById("bannerTitle");
+var bannerSub = document.getElementById("bannerSub");
+var fallMsg = document.getElementById("fallMsg");
+var touchHints = document.getElementById("touchHints");
+var tipEl = document.getElementById("tip");
+
+var MEDAL_COL = { gold: "#ffcf2e", silver: "#dfe6ee", bronze: "#e08a45" };
+var MEDAL_ICON = { gold: "🥇", silver: "🥈", bronze: "🥉" };
+
+var lastTimeStr = "";
+function updateHud() {
+  lvlChip.textContent = "LEVEL " + level;
+  bestChip.textContent = "BEST " + best;
+  var s = levelTime.toFixed(1);
+  if (s !== lastTimeStr) { timeChip.textContent = s; lastTimeStr = s; }
+}
+
+function renderMedals() {
+  var show = medals.slice(-14);
+  var extra = medals.length - show.length;
+  var html = extra > 0 ? '<span id="medalMore">+' + extra + "</span>" : "";
+  for (var i = 0; i < show.length; i++) html += '<span class="medal ' + show[i] + '"></span>';
+  medalsEl.innerHTML = html;
+}
+
+function showTip(text, secs) {
+  tipEl.textContent = text;
+  tipEl.classList.add("visible");
+  tipT = secs || 2.2;
+}
+
+// =============================================================================
+// input
+// =============================================================================
+var input = { forward: false, jump: false, jumpEdge: false };
+var keyForward = false, touchForward = false;
+
+function setForward() { input.forward = keyForward || touchForward; }
+
+function pressJump() {
+  input.jumpEdge = true;
+  player.jumpBuf = JUMP_BUFFER;
+}
+
+window.addEventListener("keydown", function (e) {
+  if (e.repeat) {
+    if (e.key === " " || e.code === "Space") e.preventDefault();
+    return;
+  }
+  var k = e.key;
+  if (k === "w" || k === "W" || k === "ArrowUp") {
+    keyForward = true; setForward(); e.preventDefault(); anyInput();
+  } else if (k === " " || e.code === "Space" || k === "ArrowRight" || k === "Enter") {
+    pressJump(); e.preventDefault(); anyInput();
+  } else if (k === "m" || k === "M") {
+    initAudio(); audio.muted = !audio.muted; applyMute(); e.preventDefault();
+  } else {
+    anyInput();
+  }
+}, { passive: false });
+
+window.addEventListener("keyup", function (e) {
+  var k = e.key;
+  if (k === "w" || k === "W" || k === "ArrowUp") { keyForward = false; setForward(); }
+}, { passive: true });
+
+// touch / mouse: hold the left half to run, tap the right half to jump
+var forwardPointers = new Set();
+
+function pointerSide(e) {
+  var w = window.innerWidth || document.documentElement.clientWidth;
+  return e.clientX < w * 0.5 ? "L" : "R";
+}
+
+renderer.domElement.addEventListener("pointerdown", function (e) {
+  anyInput();
+  if (state === TITLE) return;
+  if (pointerSide(e) === "L") {
+    forwardPointers.add(e.pointerId);
+    touchForward = true;
+    setForward();
+  } else {
+    pressJump();
+  }
+  if (e.pointerType !== "mouse") e.preventDefault();
+}, { passive: false });
+
+function endPointer(e) {
+  if (forwardPointers.delete(e.pointerId)) {
+    touchForward = forwardPointers.size > 0;
+    setForward();
+  }
+}
+window.addEventListener("pointerup", endPointer, { passive: true });
+window.addEventListener("pointercancel", endPointer, { passive: true });
+window.addEventListener("blur", function () {
+  forwardPointers.clear();
+  touchForward = false; keyForward = false; setForward();
+}, { passive: true });
+
+// stop the page from scrolling / zooming around the canvas
+["touchstart", "touchmove", "touchend", "gesturestart", "contextmenu"].forEach(function (n) {
+  document.addEventListener(n, function (e) {
+    if (e.target === muteBtn || (muteBtn.contains && muteBtn.contains(e.target))) return;
+    if (state !== TITLE || n === "touchmove" || n === "gesturestart") e.preventDefault();
+  }, { passive: false });
+});
+
+muteBtn.addEventListener("click", function (e) {
+  e.stopPropagation();
+  initAudio();
+  audio.muted = !audio.muted;
+  applyMute();
+});
+muteBtn.addEventListener("pointerdown", function (e) { e.stopPropagation(); }, { passive: true });
+
+titleEl.addEventListener("pointerdown", function (e) { e.preventDefault(); anyInput(); }, { passive: false });
+
+function anyInput() {
+  initAudio();
+  if (state === TITLE) startRun();
+}
+
+// =============================================================================
+// world queries
+// =============================================================================
+function platformUnder(z, yFrom, yTo) {
+  // the highest platform top crossed while moving from yFrom down to yTo
+  var bestP = null;
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    if (z < p.z0 - EDGE_GRACE || z > p.z1 + EDGE_GRACE) continue;
+    if (yFrom >= p.y - 0.02 && yTo <= p.y + 0.02) {
+      if (!bestP || p.y > bestP.y) bestP = p;
+    }
+  }
+  return bestP;
+}
+
+function standingOn(z, y) {
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    if (z < p.z0 - EDGE_GRACE || z > p.z1 + EDGE_GRACE) continue;
+    if (Math.abs(y - p.y) < 0.06) return p;
+  }
+  return null;
+}
+
+// closest point on a grab and its distance from the hands
+function grabDistance(g, hz, hy) {
+  if (g.kind === "pend") {
+    if (g.ropeLen > 0.4) {
+      // closest point on the rope segment, from the pivot down to the handle
+      var ex = handleZ(g), ey = handleY(g);
+      var dz = ex - g.pz, dy = ey - g.py;
+      var t = clamp(((hz - g.pz) * dz + (hy - g.py) * dy) / (dz * dz + dy * dy || 1), 0, 1);
+      var cz = g.pz + dz * t, cy = g.py + dy * t;
+      return Math.hypot(hz - cz, hy - cy);
+    }
+    return Math.hypot(hz - g.pz, hy - g.py);
+  }
+  if (g.kind === "rail") {
+    var z = clamp(hz, g.z0, g.z1);
+    return Math.hypot(hz - z, hy - g.y);
+  }
+  if (g.kind === "climb") {
+    var y = clamp(hy, g.y0, g.y1);
+    return Math.hypot(hz - g.z, hy - y);
+  }
+  return Infinity;
+}
+
+function handleZ(g) { return g.pz + g.ropeLen * Math.sin(g.theta || 0); }
+function handleY(g) { return g.py - g.ropeLen * Math.cos(g.theta || 0); }
+
+function grabZ(g) {
+  if (g.kind === "climb") return g.z;
+  if (g.kind === "rail") return (g.z0 + g.z1) / 2;
+  return g.pz;
+}
+
+function tryGrab(radius) {
+  if (player.hang || player.releaseLock > 0) return false;
+  var hz = player.z, hy = player.y + HAND_H;
+  var bestG = null, bestD = radius;
+  for (var i = 0; i < grabs.length; i++) {
+    var g = grabs[i];
+    if (Math.abs(grabZ(g) - hz) > 24) continue;   // cheap reject far away rigs
+    var d = grabDistance(g, hz, hy);
+    if (d < bestD) { bestD = d; bestG = g; }
+  }
+  if (!bestG) return false;
+  attach(bestG);
+  return true;
+}
+
+function attach(g) {
+  player.hang = g;
+  player.flip = 0;
+  player.hangT = 0;
+  player.jumpBuf = 0;         // the press that grabbed must not also let go
+  sfxGrab();
+  if (g.kind === "pend") {
+    var dz = player.z - g.pz;
+    var dy = (player.y + HAND_H) - g.py;
+    var th = Math.atan2(dz, -dy);
+    if (!isFinite(th)) th = 0;
+    player.theta = clamp(th, -1.3, 1.3);
+    // carry the incoming speed into the swing
+    var tz = Math.cos(player.theta), ty = Math.sin(player.theta);
+    player.omega = clamp((player.vz * tz + player.vy * ty) / g.len, -4.5, 4.5);
+    if (g.swing) g.theta = player.theta;
+    applyPendulum(g);
+  } else if (g.kind === "rail") {
+    player.z = clamp(player.z, g.z0, g.z1);
+    player.y = g.y - HAND_H;
+  } else if (g.kind === "climb") {
+    player.z = g.z;
+    player.y = clamp(player.y, g.y0 - HAND_H + 0.4, g.y1 - HAND_H);
+  }
+  player.vz = 0; player.vy = 0;
+  player.onGround = false;
+  player.lastGroundY = Math.max(player.lastGroundY, player.y);
+}
+
+function applyPendulum(g) {
+  player.z = g.pz + g.len * Math.sin(player.theta);
+  player.y = g.py - g.len * Math.cos(player.theta);
+}
+
+function release(boost) {
+  var g = player.hang;
+  if (!g) return;
+  if (g.kind === "pend") {
+    var vz = g.len * player.omega * Math.cos(player.theta);
+    var vy = g.len * player.omega * Math.sin(player.theta);
+    player.vz = vz * 1.3 + (vz > 0 ? 1.0 : 0);
+    player.vy = vy * 1.3 + 2.0;
+  } else if (g.kind === "rail") {
+    player.vz = 5.8;
+    player.vy = 4.6;
+  } else if (g.kind === "climb") {
+    player.vz = 5.8;
+    player.vy = 6.2;
+  }
+  if (boost) { player.vz += 0.4; player.vy += 0.4; }
+  player.vz = clamp(player.vz, -6, 15);
+  player.vy = clamp(player.vy, -14, 14);
+  player.hang = null;
+  player.releaseLock = RELEASE_LOCK;
+  player.air = 0.2;
+  sfxWhoosh();
+}
+
+// =============================================================================
+// run / level flow
+// =============================================================================
+function clearCourses() {
+  for (var i = 0; i < courses.length; i++) disposeCourse(courses[i]);
+  courses.length = 0;
+}
+
+function startRun() {
+  state = PLAYING;
+  level = 1;
+  podiums = 0;
+  medals = [];
+  levelTime = 0;
+  clearCourses();
+  current = generateCourse(1, 0, 0);
+  courses.push(current);
+  rebuildWorldLists();
+  spawn.z = current.spawn.z;
+  spawn.y = current.spawn.y;
+  respawn();
+  initClouds(0);
+  initBalloons(0);
+
+  titleEl.classList.remove("visible");
+  hudEl.classList.add("visible");
+  muteBtn.classList.add("visible");
+  touchHints.classList.add("visible");
+  renderMedals();
+  updateHud();
+  startMusic();
+  showTip("Hold forward and jump the gaps!", 3.2);
+  // snap the camera behind the player right away
+  camera.position.set(0, spawn.y + 3.4, spawn.z - 8.4);
+}
+
+function respawn() {
+  player.z = spawn.z;
+  player.y = spawn.y;
+  player.vz = 0; player.vy = 0;
+  player.hang = null;
+  player.onGround = true;
+  player.coyote = COYOTE;
+  player.jumpBuf = 0;
+  player.flip = 0;
+  player.releaseLock = 0;
+  player.air = 0;
+  player.lastGroundY = spawn.y;
+  levelTime = 0;
+  state = PLAYING;
+  fallMsg.classList.remove("visible");
+}
+
+function completeLevel() {
+  var t = levelTime;
+  var par = current.parTime;
+  var kind = t < par ? "gold" : (t < par * 1.5 ? "silver" : "bronze");
+  medals.push(kind);
+  podiums++;
+  if (podiums > best) {
+    best = podiums;
+    storeSet("ninja.best", String(best));
+  }
+  renderMedals();
+  updateHud();
+
+  state = CELEBRATE;
+  celebrateT = 0;
+  player.vz = 0; player.vy = 0;
+  player.hang = null;
+  player.flip = 0;
+
+  var p = current.podium;
+  burstConfetti(0, p.y + 1.0, p.z);
+  sfxMedal(kind);
+
+  bannerMedal.style.background = MEDAL_COL[kind];
+  bannerMedal.innerHTML = MEDAL_ICON[kind];
+  bannerTitle.textContent = "PODIUM " + podiums + "!";
+  bannerSub.textContent = kind.toUpperCase() + " · " + t.toFixed(1) + "s · PAR " + par.toFixed(1) + "s";
+  bannerEl.classList.remove("visible");
+  void bannerEl.offsetWidth;    // restart the pop animation
+  bannerEl.classList.add("visible");
+
+  // the next course starts right off the back of the podium
+  var next = generateCourse(level + 1, p.z + 1.15, p.y);
+  courses.push(next);
+  if (courses.length > 2) disposeCourse(courses.shift());
+  rebuildWorldLists();
+  current = next;
+  spawn.z = p.z;
+  spawn.y = p.y;
+}
+
+function endCelebrate() {
+  bannerEl.classList.remove("visible");
+  level++;
+  levelTime = 0;
+  player.z = spawn.z;
+  player.y = spawn.y;
+  player.vy = 0; player.vz = 0;
+  player.onGround = true;
+  player.coyote = COYOTE;
+  player.air = 0;
+  player.lastGroundY = spawn.y;
+  state = PLAYING;
+  updateHud();
+  if (level === 2) showTip("Level 2 - watch for swinging ropes", 3.0);
+  else if (level === 3) showTip("Level 3 - lache bars and rope climbs", 3.0);
+}
+
+function startFall() {
+  state = FALLING;
+  fallT = 0;
+  player.hang = null;
+  sfxFall();
+  fallMsg.classList.add("visible");
+}
+
+// =============================================================================
+// per frame update
+// =============================================================================
+function update(dt) {
+  var jumpPressed = input.jumpEdge;
+  input.jumpEdge = false;
+
+  if (state === TITLE) {
+    idleNinja(dt);
+    return;
+  }
+
+  if (state === CELEBRATE) {
+    celebrateT += dt;
+    // a happy little bounce on the top step
+    player.z = damp(player.z, spawn.z, 8, dt);
+    player.y = spawn.y + Math.abs(Math.sin(celebrateT * 6.2)) * 0.5;
+    poseCelebrate(dt);
+    if (celebrateT > 2.5) endCelebrate();
+    return;
+  }
+
+  if (state === FALLING) {
+    fallT += dt;
+    player.vy = Math.max(player.vy - GRAVITY * dt, -MAX_FALL);
+    player.y += player.vy * dt;
+    player.z += player.vz * dt;
+    player.flip += FLIP_SPEED * 0.55 * dt;
+    poseAir(dt);
+    if (fallT > 1.15) respawn();
+    return;
+  }
+
+  // ---------------- PLAYING ----------------
+  levelTime += dt;
+  if (player.releaseLock > 0) player.releaseLock -= dt;
+  if (player.jumpBuf > 0) player.jumpBuf -= dt;
+
+  if (player.hang) {
+    updateHanging(dt, jumpPressed);
+  } else {
+    updateFree(dt, jumpPressed);
+  }
+
+  // fell off the world?
+  if (!player.hang && player.y < player.lastGroundY - FALL_LIMIT) startFall();
+}
+
+function updateHanging(dt, jumpPressed) {
+  var g = player.hang;
+  player.hangT += dt;
+
+  if (g.kind === "pend") {
+    // pendulum + a little pumping while the run key is held
+    var alpha = -(GRAVITY / g.len) * Math.sin(player.theta) - PEND_DAMP * player.omega;
+    player.omega += alpha * dt;
+    if (input.forward && Math.abs(player.theta) < 1.15) {
+      player.omega += PUMP * Math.sign(player.omega || 1) * dt;
+    }
+    player.omega = clamp(player.omega, -5, 5);
+    player.theta += player.omega * dt;
+    player.theta = clamp(player.theta, -1.45, 1.45);
+    if (g.swing) g.theta = player.theta;
+    applyPendulum(g);
+    poseHang(dt, player.theta * 0.5);
+  } else if (g.kind === "rail") {
+    if (input.forward) {
+      player.z += RAIL_SPEED * dt;
+      if (player.z > g.z1) {
+        player.z = g.z1;
+        // drop off the far end automatically so nobody gets stuck
+        release(false);
+        return;
+      }
+    }
+    player.y = g.y - HAND_H;
+    poseRail(dt);
+  } else if (g.kind === "climb") {
+    if (input.forward) {
+      player.y += CLIMB_SPEED * dt;
+      if (player.y > g.y1 - HAND_H) player.y = g.y1 - HAND_H;
+    }
+    player.z = g.z;
+    poseClimb(dt);
+  }
+
+  if (player.hangT > 0.12 && (jumpPressed || player.jumpBuf > 0)) {
+    player.jumpBuf = 0;
+    release(true);
+  }
+}
+
+function updateFree(dt, jumpPressed) {
+  // horizontal
+  if (player.onGround) {
+    player.vz = input.forward ? damp(player.vz, RUN_SPEED, 14, dt) : damp(player.vz, 0, 9, dt);
+  } else {
+    if (input.forward) player.vz = Math.min(RUN_SPEED, player.vz + AIR_ACCEL * dt);
+    else player.vz = Math.max(0, player.vz - AIR_DRAG * dt);
+  }
+
+  // jump
+  if ((jumpPressed || player.jumpBuf > 0) && (player.onGround || player.coyote > 0)) {
+    player.vy = JUMP_V;
+    player.onGround = false;
+    player.coyote = 0;
+    player.jumpBuf = 0;
+    player.air = 0;
+    sfxJump();
+    puff(0, player.y + 0.05, player.z, 5, 0.3, 1.4);
+  } else if (jumpPressed || player.jumpBuf > 0) {
+    // in the air: space reaches out for a rope or bar
+    if (tryGrab(2.1 - 0.5 * (current ? current.d : 0))) {
+      player.jumpBuf = 0;
+      return;
+    }
+  }
+
+  var prevY = player.y;
+  if (!player.onGround) {
+    player.vy = Math.max(player.vy - GRAVITY * dt, -MAX_FALL);
+    player.air += dt;
+  }
+  player.y += player.vy * dt;
+  player.z += player.vz * dt;
+
+  // podium blocks: you must jump onto them, not through them
+  for (var i = 0; i < blockers.length; i++) {
+    var b = blockers[i];
+    if (player.y < b.top - 0.2 && player.z + 0.34 > b.z0 && player.z < b.z1) {
+      player.z = b.z0 - 0.34;
+      if (player.vz > 0) player.vz = 0;
+    }
+  }
+
+  // forgiving auto-grab so bars catch you even without a perfect press
+  if (!player.onGround && player.air > 0.14) {
+    tryGrab(1.2 - 0.35 * (current ? current.d : 0));
+    if (player.hang) return;
+  }
+
+  // landing
+  if (player.vy <= 0) {
+    var p = platformUnder(player.z, prevY, player.y);
+    if (p) {
+      player.y = p.y;
+      player.vy = 0;
+      if (!player.onGround) {
+        sfxLand();
+        puff(0, p.y, player.z, 8, 0.4, 2.0);
+        squashT = 0.16;
+      }
+      player.onGround = true;
+      player.lastGroundY = p.y;
+      player.coyote = COYOTE;
+      player.air = 0;
+      // the flag is cleared so standing on the podium cannot score it twice
+      if (p.isPodium) { p.isPodium = false; completeLevel(); return; }
+    } else {
+      if (player.onGround) {
+        // walked off an edge
+        var still = standingOn(player.z, player.y);
+        if (!still) { player.onGround = false; player.coyote = COYOTE; }
+      }
+    }
+  } else {
+    player.onGround = false;
+  }
+
+  if (player.onGround) {
+    var still2 = standingOn(player.z, player.y);
+    if (!still2) { player.onGround = false; player.coyote = COYOTE; }
+  }
+  if (!player.onGround && player.coyote > 0) player.coyote -= dt;
+
+  // pose
+  if (player.onGround) poseRun(dt);
+  else poseAir(dt);
+}
+
+function roundTo2Pi(a) { return Math.round(a / (Math.PI * 2)) * Math.PI * 2; }
+
+// =============================================================================
+// character posing
+// =============================================================================
+function setArms(a, b) { armL.rotation.x = a; armR.rotation.x = b; }
+function setLegs(a, b) { legL.rotation.x = a; legR.rotation.x = b; }
+
+function poseRun(dt) {
+  var speed = Math.abs(player.vz);
+  player.runPhase += dt * (3.0 + speed * 1.5);
+  var s = speed / RUN_SPEED;
+  var sw = Math.sin(player.runPhase) * 0.95 * s;
+  setLegs(sw, -sw);
+  setArms(-sw * 0.85, sw * 0.85);
+  head.rotation.x = -0.06 * s;
+  ninjaBody.position.y = -1.0 + Math.abs(Math.sin(player.runPhase)) * 0.07 * s;
+  player.flip = damp(player.flip, roundTo2Pi(player.flip), 18, dt);
+  ninjaFlip.rotation.x = player.flip;
+  // footsteps
+  player.stepT -= dt * (3.0 + speed * 1.5);
+  if (s > 0.35 && player.stepT <= 0) {
+    player.stepT = Math.PI;
+    sfxStep();
+    puff(0, player.y + 0.02, player.z - 0.3, 2, 0.18, 0.9);
+  }
+  if (squashT > 0) squashT -= dt;
+  var sq = clamp(squashT / 0.16, 0, 1);
+  ninjaBody.scale.set(1 + sq * 0.35, 1 - sq * 0.3, 1 + sq * 0.35);
+}
+
+function poseAir(dt) {
+  player.flip += FLIP_SPEED * dt;
+  ninjaFlip.rotation.x = player.flip;
+  // tuck
+  setLegs(-1.15, -0.85);
+  setArms(-2.3, -2.3);
+  head.rotation.x = 0.25;
+  ninjaBody.position.y = -1.0;
+  ninjaBody.scale.set(0.97, 1.05, 0.97);
+}
+
+function poseHang(dt, tilt) {
+  player.flip = damp(player.flip, 0, 16, dt);
+  ninjaFlip.rotation.x = player.flip;
+  setArms(Math.PI * 0.97, Math.PI * 0.97);
+  var k = Math.sin(performance.now() * 0.004) * 0.15;
+  setLegs(0.35 + k - tilt, 0.1 - k - tilt);
+  head.rotation.x = -0.2;
+  ninjaBody.position.y = -1.0;
+  ninjaBody.scale.set(1, 1, 1);
+}
+
+function poseRail(dt) {
+  player.flip = damp(player.flip, 0, 16, dt);
+  ninjaFlip.rotation.x = player.flip;
+  player.runPhase += dt * 7;
+  var sw = Math.sin(player.runPhase) * 0.22;
+  setArms(Math.PI * 0.97 + sw, Math.PI * 0.97 - sw);
+  setLegs(0.4 + sw * 0.7, 0.15 - sw * 0.7);
+  head.rotation.x = -0.25;
+  ninjaBody.position.y = -1.0;
+  ninjaBody.scale.set(1, 1, 1);
+}
+
+function poseClimb(dt) {
+  player.flip = damp(player.flip, 0, 16, dt);
+  ninjaFlip.rotation.x = player.flip;
+  player.runPhase += dt * 8;
+  var sw = Math.sin(player.runPhase) * 0.3;
+  setArms(Math.PI * 0.94 + sw, Math.PI * 0.94 - sw);
+  setLegs(0.55 - sw, 0.55 + sw);
+  head.rotation.x = -0.15;
+  ninjaBody.position.y = -1.0;
+  ninjaBody.scale.set(1, 1, 1);
+}
+
+function poseCelebrate(dt) {
+  player.flip = damp(player.flip, 0, 14, dt);
+  ninjaFlip.rotation.x = player.flip;
+  var k = Math.sin(celebrateT * 8) * 0.25;
+  setArms(-2.6 + k, -2.6 - k);
+  setLegs(0.15, -0.15);
+  head.rotation.x = -0.2;
+  ninjaBody.position.y = -1.0;
+  ninjaBody.scale.set(1, 1, 1);
+}
+
+function idleNinja(dt) {
+  player.runPhase += dt * 2;
+  var k = Math.sin(player.runPhase) * 0.15;
+  setArms(-0.1 + k, -0.1 - k);
+  setLegs(0.1, -0.1);
+  head.rotation.x = 0;
+  ninjaFlip.rotation.x = 0;
+  ninjaBody.position.y = -1.0 + Math.sin(player.runPhase * 1.4) * 0.04;
+  ninjaBody.scale.set(1, 1, 1);
+}
+
+// =============================================================================
+// camera + render
+// =============================================================================
+var camLookY = 0, camLookZ = 0, started = false;
+
+function updateCamera(dt) {
+  var tz = player.z - 8.4;
+  var ty = player.y + 3.4;
+  var lambda = started ? 7 : 60;
+  camera.position.z = damp(camera.position.z, tz, lambda, dt);
+  camera.position.y = damp(camera.position.y, ty, lambda * 0.75, dt);
+  camera.position.x = 0;
+  camLookY = damp(camLookY, player.y + 1.4, 6, dt);
+  camLookZ = damp(camLookZ, player.z + 5.0, 8, dt);
+  camera.lookAt(0, camLookY, camLookZ);
+  started = true;
+
+  skyMesh.position.copy(camera.position);
+  sunDisc.position.copy(camera.position).addScaledVector(SUN_DIR, 420);
+  sunGlow.position.copy(sunDisc.position);
+
+  // keep the shadow frustum tight around the player
+  sun.target.position.set(0, player.y, player.z + 2);
+  sun.position.set(-12, player.y + 20, player.z + 18);
+  sun.target.updateMatrixWorld();
+}
+
+function syncNinja() {
+  ninja.position.set(0, player.y, player.z);
+}
+
+// hanging ropes sway gently on their own, and follow the player when held
+function animateRopes(now, dt) {
+  for (var i = 0; i < grabs.length; i++) {
+    var g = grabs[i];
+    if (!g.node) continue;
+    if (Math.abs(g.pz - player.z) > 70) continue;
+    if (player.hang === g) g.theta = player.theta;
+    else g.theta = damp(g.theta || 0, Math.sin(now * 0.0012 + g.pz * 0.7) * 0.07, 2.5, dt);
+    g.node.rotation.x = -g.theta;
+  }
+}
+
+function updateStars(now) {
+  for (var i = 0; i < courses.length; i++) {
+    var p = courses[i].podium;
+    if (!p || !p.star) continue;
+    p.star.rotation.y = now * 0.002;
+    p.star.position.y = p.starY + Math.sin(now * 0.004 + p.z) * 0.18;
+  }
+}
+
+var last = performance.now();
+var acc = 0;
+
+function frame(now) {
+  requestAnimationFrame(frame);
+  var dt = (now - last) / 1000;
+  last = now;
+  if (!(dt > 0)) dt = 0.016;
+  if (dt > 0.1) dt = 0.1;      // never tunnel after a stall
+
+  // fixed-ish steps keep the physics stable on slow frames
+  acc += dt;
+  var guard = 0;
+  while (acc >= 1 / 120 && guard++ < 8) {
+    update(1 / 120);
+    acc -= 1 / 120;
+  }
+
+  syncNinja();
+  animateRopes(now, dt);
+  updateCamera(dt);
+  updateClouds(player.z);
+  updateBalloons(now, player.z);
+  updateStars(now);
+  updateDust(dt);
+  updateBlob();
+  updateConfetti(dt);
+  pumpMusic();
+
+  if (state !== TITLE) updateHud();
+  if (tipT > 0) {
+    tipT -= dt;
+    if (tipT <= 0) tipEl.classList.remove("visible");
+  }
+
+  renderer.render(scene, camera);
+}
+
+function resize() {
+  var w = window.innerWidth, h = window.innerHeight;
+  if (window.visualViewport) { w = window.visualViewport.width; h = window.visualViewport.height; }
+  w = Math.max(1, Math.round(w));
+  h = Math.max(1, Math.round(h));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(w, h, false);
+  renderer.domElement.style.width = "100%";
+  renderer.domElement.style.height = "100%";
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize, { passive: true });
+window.addEventListener("orientationchange", function () { setTimeout(resize, 250); }, { passive: true });
+if (window.visualViewport) window.visualViewport.addEventListener("resize", resize, { passive: true });
+
+// =============================================================================
+// boot: a small showcase course behind the title card
+// =============================================================================
+function boot() {
+  resize();
+  applyMute();
+  titleBest.textContent = "BEST RUN: " + best + (best === 1 ? " PODIUM" : " PODIUMS");
+
+  // a decorative course so the title screen is not empty
+  var demo = generateCourse(2, 0, 0);
+  courses.push(demo);
+  current = demo;
+  rebuildWorldLists();
+  player.z = 4; player.y = 0;
+  initClouds(0);
+  initBalloons(0);
+  camera.position.set(0, 4.6, -8.4);
+  camLookY = 1.4; camLookZ = 9;
+  syncNinja();
+  requestAnimationFrame(frame);
+}
+
+boot();
+
+// hidden demo mode for screenshots and testing: ?auto runs and jumps by itself
+if (location.search.indexOf("auto") >= 0) {
+  startRun();
+  keyForward = true;
+  setForward();
+  setInterval(pressJump, 900);
+}
+</script>
+</body>
+</html>
