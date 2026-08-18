@@ -288,6 +288,32 @@
     px(x + 1, y + 1, 1, CELL - 3, light);
   }
 
+  // a block caught by the edge of a blast: still standing, but scorched, with
+  // bites out of its corners and cracks across the face. The bites are painted
+  // in near-black so they read as holes against the night sky behind.
+  var CHIP = "#0a0812";
+  function drawBlockDamaged(x, y, tone, v) {
+    if (x + CELL < 0 || x > W || y + CELL < 0 || y > H) return;
+    drawBlock(x, y, tone);
+
+    // scorch the face
+    ctx.fillStyle = "rgba(0,0,0,0.26)";
+    ctx.fillRect(x, y, CELL, CELL);
+
+    // corner bites, picked by the variant bits
+    if (v & 1) { px(x + CELL - 4, y, 4, 3, CHIP); px(x + CELL - 2, y + 3, 2, 2, CHIP); }
+    if (v & 2) { px(x, y + CELL - 4, 3, 4, CHIP); px(x + 3, y + CELL - 2, 2, 2, CHIP); }
+    if (v & 4) { px(x, y, 3, 2, CHIP); px(x + CELL - 3, y + CELL - 3, 3, 3, CHIP); }
+
+    // crack running down the face
+    px(x + 5, y + 2, 1, 2, CHIP);
+    px(x + 6, y + 4, 1, 2, CHIP);
+    px(x + 5, y + 6, 1, 2, CHIP);
+    px(x + 7, y + 8, 1, 3, CHIP);
+    if (v & 2) px(x + 3, y + 5, 2, 1, CHIP);
+    if (v & 4) px(x + 8, y + 3, 1, 2, CHIP);
+  }
+
   function toneFor(col, row) {
     var t = ((col * 7 + row * 5) % 6 + 6) % 6;
     if (t < 3) return 0;
@@ -620,14 +646,24 @@
   var flash = 0;
   var heroAlive = true;
 
-  // clears the columns (and with them any exploded-block bookkeeping) plus
-  // all debris, so a replay always starts clean
+  // impact effects
+  var SHAKE_DUR = 0.55;   // s of camera shake
+  var SHAKE_AMP = 5;      // px at peak
+  var AB_DUR    = 0.42;   // s of chromatic aberration
+  var AB_MAX    = 3;      // px of RGB split at peak
+  var shakeT = 0, shakeX = 0, shakeY = 0;
+  var abT = 0;
+
+  // clears the columns (and with them the destroyed/damaged block maps) plus
+  // all debris and impact effects, so a replay always starts clean
   function resetScene() {
     columns.length = 0;
     particles.length = 0;
     offFar = 0; offNear = 0; offGround = 0;
     speed = SPEED_BASE;
     heroAlive = true;
+    shakeT = 0; shakeX = 0; shakeY = 0;
+    abT = 0;
   }
 
   function startGame() {
@@ -677,8 +713,10 @@
   var particles = [];
   var PART_GRAVITY = 300;   // px/s^2
   var PART_LIFE    = 1.0;   // s
-  var BLAST_R      = 14;    // px - blocks within this of the impact break up
-  var MAX_PARTS    = 420;
+  var BLAST_R      = 28;    // px - blocks this close to the impact break apart
+  var DAMAGE_R     = 44;    // px - blocks out to here crack but stay standing
+  // headroom for the 213 cube pixels plus ~10 blocks x 9 brick chunks
+  var MAX_PARTS    = 700;
 
   // tone >= 0 marks a shaded brick chunk; otherwise it is a flat pixel
   function addPart(x, y, vx, vy, size, col, life, tone) {
@@ -746,18 +784,27 @@
     px(x, y + n - 1, n, 1, t[2]);   // bottom shade
   }
 
-  // break the blocks of the hit column that sit near the impact point
+  // break the blocks of the hit column near the impact: an inner radius is
+  // destroyed outright, an outer ring is left standing but cracked
   function explodeNearbyBlocks(c, ox, oy) {
     if (!c) return;
     if (!c.gone) c.gone = {};
-    var cx = Math.round(c.x), b, y, row;
+    if (!c.dmg) c.dmg = {};
+    var cx = Math.round(c.x), b, y, row, d, key, tone;
 
     y = c.gapTop - CELL; row = 0;
     while (y > -CELL) {
-      if (Math.abs(y + CELL / 2 - oy) <= BLAST_R) {
+      d = Math.abs(y + CELL / 2 - oy);
+      if (d <= DAMAGE_R) {
         for (b = 0; b < COL_W / CELL; b++) {
-          c.gone["t" + row + "_" + b] = 1;
-          explodeBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b, row), ox, oy);
+          key = "t" + row + "_" + b;
+          tone = toneFor(c.seed * 3 + b, row);
+          if (d <= BLAST_R) {
+            c.gone[key] = 1;
+            explodeBlock(cx + b * CELL, y, tone, ox, oy);
+          } else {
+            c.dmg[key] = 1 + ((row * 3 + b * 5 + c.seed) % 7);
+          }
         }
       }
       y -= CELL; row++;
@@ -765,10 +812,17 @@
 
     y = c.gapTop + GAP_H; row = 0;
     while (y < GROUND_Y) {
-      if (Math.abs(y + CELL / 2 - oy) <= BLAST_R) {
+      d = Math.abs(y + CELL / 2 - oy);
+      if (d <= DAMAGE_R) {
         for (b = 0; b < COL_W / CELL; b++) {
-          c.gone["b" + row + "_" + b] = 1;
-          explodeBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b + 1, row + 4), ox, oy);
+          key = "b" + row + "_" + b;
+          tone = toneFor(c.seed * 3 + b + 1, row + 4);
+          if (d <= BLAST_R) {
+            c.gone[key] = 1;
+            explodeBlock(cx + b * CELL, y, tone, ox, oy);
+          } else {
+            c.dmg[key] = 1 + ((row * 3 + b * 5 + c.seed) % 7);
+          }
         }
       }
       y += CELL; row++;
@@ -796,6 +850,24 @@
     }
   }
 
+  // decaying camera shake + RGB split, advanced on the fixed timestep
+  function updateImpactFx(dt) {
+    if (shakeT > 0) {
+      shakeT -= dt;
+      if (shakeT <= 0) {
+        shakeT = 0; shakeX = 0; shakeY = 0;
+      } else {
+        var amp = SHAKE_AMP * (shakeT / SHAKE_DUR);
+        shakeX = Math.round((Math.random() * 2 - 1) * amp);
+        shakeY = Math.round((Math.random() * 2 - 1) * amp);
+      }
+    }
+    if (abT > 0) {
+      abT -= dt;
+      if (abT < 0) abT = 0;
+    }
+  }
+
   function drawParticles() {
     for (var i = 0; i < particles.length; i++) {
       var p = particles[i];
@@ -811,6 +883,8 @@
     deadTime = 0;
     flash = 0.16;
     heroAlive = false;
+    shakeT = SHAKE_DUR;
+    abT = AB_DUR;
     stopMusic();
     sfxExplosion();
 
@@ -855,7 +929,9 @@
 
   function step(dt) {
     clock += dt;
-    updateParticles(dt);   // inside the fixed timestep, so 60Hz == 120Hz
+    // all inside the fixed timestep, so 60Hz == 120Hz
+    updateParticles(dt);
+    updateImpactFx(dt);
 
     if (state === TITLE) {
       speed = SPEED_BASE;
@@ -928,12 +1004,15 @@
     var cx = Math.round(c.x);
     if (cx > W || cx + COL_W < 0) return;
 
-    var gone = c.gone;
+    var gone = c.gone, dmg = c.dmg, key, d;
     var y = c.gapTop - CELL, row = 0, b;
     while (y > -CELL) {
       for (b = 0; b < COL_W / CELL; b++) {
-        if (gone && gone["t" + row + "_" + b]) continue;
-        drawBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b, row));
+        key = "t" + row + "_" + b;
+        if (gone && gone[key]) continue;
+        d = dmg && dmg[key];
+        if (d) drawBlockDamaged(cx + b * CELL, y, toneFor(c.seed * 3 + b, row), d);
+        else drawBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b, row));
       }
       y -= CELL;
       row++;
@@ -942,8 +1021,11 @@
     row = 0;
     while (by < GROUND_Y) {
       for (b = 0; b < COL_W / CELL; b++) {
-        if (gone && gone["b" + row + "_" + b]) continue;
-        drawBlock(cx + b * CELL, by, toneFor(c.seed * 3 + b + 1, row + 4));
+        key = "b" + row + "_" + b;
+        if (gone && gone[key]) continue;
+        d = dmg && dmg[key];
+        if (d) drawBlockDamaged(cx + b * CELL, by, toneFor(c.seed * 3 + b + 1, row + 4), d);
+        else drawBlock(cx + b * CELL, by, toneFor(c.seed * 3 + b + 1, row + 4));
       }
       by += CELL;
       row++;
@@ -973,7 +1055,49 @@
     }
   }
 
+  // RGB split: rebuild the frame from a red copy and a cyan copy pushed
+  // apart by a few whole pixels. Red + cyan sums back to the original where
+  // they line up, so only the edges fringe and nothing washes out.
+  var SNAP = null, TINT = null;
+
+  function applyAberration() {
+    if (abT <= 0) return;
+    var dx = Math.round((abT / AB_DUR) * AB_MAX);
+    if (dx <= 0) return;
+    if (!SNAP) { SNAP = makeLayer(W, H); TINT = makeLayer(W, H); }
+    var sc = SNAP.ctx, tc = TINT.ctx;
+
+    sc.clearRect(0, 0, W, H);
+    sc.drawImage(canvas, 0, 0);
+
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "lighter";
+
+    var channels = ["#ff0000", "#00ffff"];
+    for (var i = 0; i < 2; i++) {
+      tc.globalCompositeOperation = "source-over";
+      tc.clearRect(0, 0, W, H);
+      tc.drawImage(SNAP.canvas, 0, 0);
+      tc.globalCompositeOperation = "multiply";
+      tc.fillStyle = channels[i];
+      tc.fillRect(0, 0, W, H);
+      tc.globalCompositeOperation = "source-over";
+      ctx.drawImage(TINT.canvas, i === 0 ? dx : -dx, 0);
+    }
+
+    ctx.globalCompositeOperation = "source-over";
+  }
+
   function render() {
+    var shaking = (shakeX !== 0 || shakeY !== 0);
+    if (shaking) {
+      // the jolt exposes the canvas edge, so lay down the sky colour first
+      px(0, 0, W, H, P.skyTop);
+      ctx.save();
+      ctx.translate(shakeX, shakeY);
+    }
+
     // background
     ctx.drawImage(SKY.canvas, 0, 0);
     drawTiled(FAR, offFar, 0);
@@ -997,6 +1121,11 @@
     // vignette
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, W, H);
+
+    if (shaking) ctx.restore();
+
+    // RGB fringing on the scene, before the HUD goes on top
+    applyAberration();
 
     // HUD / screens
     var blink = (Math.floor(clock * 1.6) % 2) === 0;
