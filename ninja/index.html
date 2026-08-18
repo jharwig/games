@@ -891,6 +891,7 @@ function limb(parent, x, y, w, h, d, hex) {
 
 var player = {
   z: 0, y: 0, vz: 0, vy: 0,
+  visOffZ: 0, visOffY: 0,   // visual-only offset that eases out a grab snap
   onGround: false, coyote: 0, jumpBuf: 0,
   jumpCut: false, jumpHold: 0,   // variable jump height: armed while the rise can still be cut
   flip: 0, runPhase: 0, stepT: 0, moveAnim: 0,
@@ -941,13 +942,21 @@ box(head, -0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false); // eyes
 box(head,  0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false);
 box(head, 0, 0.3, 0.02, 0.5, 0.14, 0.46, 0x25313f, true);       // hair top
 box(head, 0, 0.28, -0.28, 0.2, 0.2, 0.16, 0x25313f, true);      // ponytail base
-box(head, 0, 0.3, -0.33, 0.22, 0.1, 0.1, BAND, true);           // hair tie
-box(head, 0, 0.06, -0.4, 0.16, 0.34, 0.14, 0x25313f, true);     // ponytail, upper
-box(head, 0, -0.24, -0.44, 0.13, 0.3, 0.11, 0x25313f, true);    // ponytail, tip
+// the ponytail hangs from two hinged segments so it can swing and whip
+var pony = new THREE.Group();
+pony.position.set(0, 0.28, -0.28);
+head.add(pony);
+box(pony, 0, 0.02, -0.05, 0.22, 0.1, 0.1, BAND, true);          // hair tie
+box(pony, 0, -0.22, -0.12, 0.16, 0.34, 0.14, 0x25313f, true);   // ponytail, upper
+var ponyTip = new THREE.Group();
+ponyTip.position.set(0, -0.38, -0.14);
+pony.add(ponyTip);
+box(ponyTip, 0, -0.14, -0.02, 0.13, 0.3, 0.11, 0x25313f, true); // ponytail, tip
 
 ninja.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
 
-var squashT = 0;   // seconds of landing squash left
+var squashT = 0;    // seconds of landing squash left
+var squashAmp = 1;  // how hard the landing was, 0..1
 
 // a soft blob shadow marks the landing point below the ninja
 var blob = new THREE.Mesh(
@@ -1560,9 +1569,13 @@ function tryGrab(radius) {
 }
 
 function attach(g) {
+  var preZ = player.z, preY = player.y;
   player.hang = g;
-  player.flip = 0;
+  // keep the leftover part of a flip; the hang pose damps it out smoothly
+  // instead of snapping the body upright in one frame
+  player.flip -= roundTo2Pi(player.flip);
   endTrick();            // no tricks while hanging, swinging or climbing
+  snapshotPose();        // the arms swing up to the bar instead of popping
   player.hangT = 0;
   player.jumpBuf = 0;         // the press that grabbed must not also let go
   player.jumpCut = false;     // a grab ends the jump, so the lache is never cut
@@ -1588,6 +1601,10 @@ function attach(g) {
   player.vz = 0; player.vy = 0;
   player.onGround = false;
   player.lastGroundY = Math.max(player.lastGroundY, player.y);
+  // the grab can snap the body up to the grab radius in one step; keep the
+  // difference as a visual offset that eases out, so the reach looks smooth
+  player.visOffZ = clamp(preZ - player.z, -2.5, 2.5);
+  player.visOffY = clamp(preY - player.y, -2.5, 2.5);
 }
 
 function applyPendulum(g) {
@@ -1620,8 +1637,9 @@ function release(boost) {
   player.vy = clamp(player.vy, -14, 14);
   player.hang = null;
   endTrick();            // a lache keeps its own tumble, it is not a free jump
+  snapshotPose();        // the hang pose folds into the tumble
   player.releaseLock = RELEASE_LOCK;
-  player.air = 0.2;
+  player.air = 0.05;     // small, so the tumble winds up instead of snapping on
   sfxWhoosh();
 }
 
@@ -1659,6 +1677,8 @@ function startRun() {
   showTip("Hold forward and jump the gaps!", 3.2);
   // snap the camera behind the player right away
   camera.position.set(0, spawn.y + 3.4, spawn.z - 8.4);
+  camBaseY = camera.position.y;
+  camBaseZ = camera.position.z;
 }
 
 function respawn() {
@@ -1672,6 +1692,8 @@ function respawn() {
   player.flip = 0;
   player.twist = 0;
   endTrick();
+  snapshotPose();
+  player.visOffZ = 0; player.visOffY = 0;
   player.releaseLock = 0;
   player.air = 0;
   player.lastGroundY = spawn.y;
@@ -1699,9 +1721,11 @@ function completeLevel() {
   player.hang = null;
   player.flip = 0;
   endTrick();
+  snapshotPose();
 
   var p = current.podium;
   burstConfetti(0, p.y + 1.0, p.z);
+  camImpulse(0.45);
   sfxMedal(kind);
 
   bannerMedal.style.background = MEDAL_COL[kind];
@@ -1724,6 +1748,7 @@ function completeLevel() {
 
 function endCelebrate() {
   bannerEl.classList.remove("visible");
+  snapshotPose();   // the cheer pose blends back into the run
   level++;
   levelTime = 0;
   player.z = spawn.z;
@@ -1743,7 +1768,9 @@ function startFall() {
   state = FALLING;
   fallT = 0;
   endTrick();
+  snapshotPose();
   player.hang = null;
+  camImpulse(0.3);
   sfxFall();
   fallMsg.classList.add("visible");
 }
@@ -1772,6 +1799,7 @@ function update(dt) {
 
   if (state === FALLING) {
     fallT += dt;
+    player.air += dt;   // keeps the tumble wind-up going in poseAir
     player.vy = Math.max(player.vy - GRAVITY * dt, -MAX_FALL);
     player.y += player.vy * dt;
     player.z += player.vz * dt;
@@ -1861,6 +1889,7 @@ function updateFree(dt, jumpPressed) {
     player.jumpCut = true;   // a short press can still cut this rise short
     player.jumpHold = 0;
     startTrick(JUMP_V);      // a fresh random trick for every free jump
+    snapshotPose();          // the run stride blends into the take off pose
     sfxJump();
     puff(0, player.y + 0.05, player.z, 5, 0.3, 1.4);
   } else if (jumpPressed || player.jumpBuf > 0) {
@@ -1910,13 +1939,18 @@ function updateFree(dt, jumpPressed) {
   if (player.vy <= 0) {
     var p = platformUnder(player.z, prevY, player.y);
     if (p) {
+      var impact = -player.vy;   // captured before the landing zeroes it
       player.y = p.y;
       player.vy = 0;
       if (!player.onGround) {
         sfxLand();
         puff(0, p.y, player.z, 8, 0.4, 2.0);
         squashT = 0.16;
+        squashAmp = clamp(impact / 14, 0.25, 1);
+        // only a hard landing moves the camera; a hop does not
+        camImpulse(clamp((impact - 8) / 14, 0, 0.9));
         endTrick();          // poseRun eases the body back upright from here
+        snapshotPose();      // the air pose blends into the run cycle
       }
       player.onGround = true;
       player.lastGroundY = p.y;
@@ -2018,13 +2052,37 @@ function smoothstep(p) { return p * p * (3 - 2 * p); }
 // =============================================================================
 // character posing
 // =============================================================================
+// pose cross-blend: a state change (grab, release, land...) snapshots the limb
+// angles, then every pose eases from the snapshot over POSE_BLEND seconds so
+// no joint ever pops in a single frame
+var POSE_BLEND = 0.15;
+var poseBlendT = 1;
+var poseCap = { aL: 0, aR: 0, lL: 0, lR: 0, head: 0 };
+
+function snapshotPose() {
+  poseCap.aL = armL.rotation.x; poseCap.aR = armR.rotation.x;
+  poseCap.lL = legL.rotation.x; poseCap.lR = legR.rotation.x;
+  poseCap.head = head.rotation.x;
+  poseBlendT = 0;
+}
+function poseK() { return smoothstep(clamp(poseBlendT / POSE_BLEND, 0, 1)); }
+
 function setArms(a, b) {
-  armL.rotation.x = a; armR.rotation.x = b;
+  var k = poseK();
+  armL.rotation.x = lerp(poseCap.aL, a, k); armR.rotation.x = lerp(poseCap.aR, b, k);
   armL.rotation.z = -player.armSpread; armR.rotation.z = player.armSpread;
 }
 function setLegs(a, b) {
-  legL.rotation.x = a; legR.rotation.x = b;
+  var k = poseK();
+  legL.rotation.x = lerp(poseCap.lL, a, k); legR.rotation.x = lerp(poseCap.lR, b, k);
   legL.rotation.z = -player.legSpread; legR.rotation.z = player.legSpread;
+}
+function setHead(a) {
+  head.rotation.x = lerp(poseCap.head, a, poseK());
+}
+// the torso leans into whatever the body is doing; eased so poses hand over softly
+function setLean(target, dt) {
+  ninjaBody.rotation.x = damp(ninjaBody.rotation.x, target, 10, dt);
 }
 
 // every pose that is not a trick eases the spin and the spread back to normal
@@ -2042,7 +2100,8 @@ function poseRun(dt) {
   var sw = Math.sin(player.runPhase) * 0.95 * s;
   setLegs(sw, -sw);
   setArms(-sw * 0.85, sw * 0.85);
-  head.rotation.x = -0.06 * s;
+  setHead(-0.06 * s);
+  setLean(0.16 * s, dt);
   ninjaBody.position.y = -1.0 + Math.abs(Math.sin(player.runPhase)) * 0.07 * s;
   player.flip = damp(player.flip, roundTo2Pi(player.flip), 18, dt);
   ninjaFlip.rotation.x = player.flip;
@@ -2055,7 +2114,8 @@ function poseRun(dt) {
     puff(0, player.y + 0.02, player.z - 0.3, 2, 0.18, 0.9);
   }
   if (squashT > 0) squashT -= dt;
-  var sq = clamp(squashT / 0.16, 0, 1);
+  // the squash scales with the landing speed: a hop dips, a big drop crunches
+  var sq = clamp(squashT / 0.16, 0, 1) * squashAmp;
   ninjaBody.scale.set(1 + sq * 0.35, 1 - sq * 0.3, 1 + sq * 0.35);
 }
 
@@ -2065,13 +2125,17 @@ function poseAir(dt) {
   ninjaBody.scale.set(0.97, 1.05, 0.97);
 
   if (!tr) {
-    // no trick: the plain tumble, used for lache releases and for falls
-    player.flip += FLIP_SPEED * dt;
+    // no trick: the plain tumble, used for lache releases and for falls.
+    // the spin winds up over the first third of a second instead of starting
+    // at full speed on frame one
+    var ramp = smoothstep(clamp(player.air / 0.32, 0, 1));
+    player.flip += FLIP_SPEED * ramp * dt;
     ninjaFlip.rotation.x = player.flip;
     settleTrick(dt);
     setLegs(-1.15, -0.85);
     setArms(-2.3, -2.3);
-    head.rotation.x = 0.25;
+    setHead(0.25);
+    setLean(0, dt);
     return;
   }
 
@@ -2090,7 +2154,8 @@ function poseAir(dt) {
   player.legSpread = d.legZ * k;
   setArms(lerp(PREP.arms[0], d.arms[0], k), lerp(PREP.arms[1], d.arms[1], k));
   setLegs(lerp(PREP.legs[0], d.legs[0], k), lerp(PREP.legs[1], d.legs[1], k));
-  head.rotation.x = lerp(PREP.head, d.head, k);
+  setHead(lerp(PREP.head, d.head, k));
+  setLean(0, dt);
 }
 
 function poseHang(dt, tilt) {
@@ -2102,7 +2167,8 @@ function poseHang(dt, tilt) {
   // kip: the legs drive the swing, tucking hard when the player pumps
   var kip = input.forward ? clamp(player.omega * 0.28, -0.7, 0.7) : 0;
   setLegs(0.35 + k - tilt - kip, 0.1 - k - tilt - kip);
-  head.rotation.x = -0.2 - kip * 0.3;
+  setHead(-0.2 - kip * 0.3);
+  setLean(-0.06 - kip * 0.12, dt);
   ninjaBody.position.y = -1.0;
   ninjaBody.scale.set(1, 1, 1);
 }
@@ -2118,7 +2184,8 @@ function poseRail(dt) {
   var sw = Math.sin(player.runPhase);
   setArms(Math.PI * 0.97 + sw * (0.12 + 0.55 * m), Math.PI * 0.97 - sw * (0.12 + 0.55 * m));
   setLegs(0.4 + sw * (0.2 + 0.55 * m), 0.15 - sw * (0.2 + 0.55 * m));
-  head.rotation.x = -0.25;
+  setHead(-0.25);
+  setLean(0.08 * m, dt);
   // each new grip hitches the body up a little
   ninjaBody.position.y = -1.0 + Math.abs(Math.cos(player.runPhase)) * 0.08 * m;
   ninjaBody.scale.set(1, 1, 1);
@@ -2135,7 +2202,8 @@ function poseClimb(dt) {
   var sw = Math.sin(player.runPhase);
   setArms(Math.PI * 0.94 + sw * (0.15 + 0.6 * m), Math.PI * 0.94 - sw * (0.15 + 0.6 * m));
   setLegs(0.45 - sw * (0.15 + 0.55 * m), 0.45 + sw * (0.15 + 0.55 * m));
-  head.rotation.x = -0.15 - m * 0.3;   // look up the rope while climbing
+  setHead(-0.15 - m * 0.3);   // look up the rope while climbing
+  setLean(-0.1 * m, dt);
   ninjaBody.position.y = -1.0 + Math.abs(sw) * 0.1 * m;
   ninjaBody.scale.set(1, 1, 1);
 }
@@ -2147,7 +2215,8 @@ function poseCelebrate(dt) {
   var k = Math.sin(celebrateT * 8) * 0.25;
   setArms(-2.6 + k, -2.6 - k);
   setLegs(0.15, -0.15);
-  head.rotation.x = -0.2;
+  setHead(-0.2);
+  setLean(0, dt);
   ninjaBody.position.y = -1.0;
   ninjaBody.scale.set(1, 1, 1);
 }
@@ -2157,7 +2226,8 @@ function idleNinja(dt) {
   var k = Math.sin(player.runPhase) * 0.15;
   setArms(-0.1 + k, -0.1 - k);
   setLegs(0.1, -0.1);
-  head.rotation.x = 0;
+  setHead(0);
+  setLean(0, dt);
   ninjaFlip.rotation.x = 0;
   player.twist = 0; player.armSpread = 0; player.legSpread = 0;
   ninjaFlip.rotation.y = 0;
@@ -2166,19 +2236,79 @@ function idleNinja(dt) {
 }
 
 // =============================================================================
+// ponytail: a two-segment lagged follower that trails the body's motion
+// =============================================================================
+var ponyAng = 0, ponyTipAng = 0;
+
+function updatePony(dt) {
+  var target;
+  if (player.hang) {
+    // sways with the swing
+    target = clamp(player.omega * 0.22, -0.45, 0.45);
+  } else if (player.onGround && state !== FALLING) {
+    // streams out at speed, with a small bounce from the stride
+    var s = Math.abs(player.vz) / RUN_SPEED;
+    target = s * 0.35 + Math.sin(player.runPhase * 2) * 0.1 * s;
+  } else {
+    // lifts while falling, tucks while rising
+    target = clamp(-player.vy * 0.05, -0.45, 0.85);
+  }
+  ponyAng = damp(ponyAng, target, 9, dt);
+  ponyTipAng = damp(ponyTipAng, ponyAng, 6.5, dt);
+  pony.rotation.x = ponyAng;
+  // the tip whips by however far it lags behind the upper segment
+  ponyTip.rotation.x = clamp((ponyAng - ponyTipAng) * 2.2, -0.9, 0.9);
+}
+
+// =============================================================================
 // camera + render
 // =============================================================================
 var camLookY = 0, camLookZ = 0, started = false;
+var camBaseY = 0, camBaseZ = 0;   // smoothed position, kept apart from the shake
+var camFov = 58, camT = 0;
+var shakeT = 0, shakeAmp = 0, camDip = 0;
+
+// a short impact: the camera dips and shakes, scaled by amp 0..1
+function camImpulse(amp) {
+  if (amp <= 0) return;
+  shakeT = 0.35;
+  shakeAmp = Math.max(shakeAmp, amp);
+  camDip = Math.max(camDip, amp * 0.55);
+}
 
 function updateCamera(dt) {
+  camT += dt;
   var tz = player.z - 8.4;
   var ty = player.y + 3.4;
   var lambda = started ? 7 : 60;
-  camera.position.z = damp(camera.position.z, tz, lambda, dt);
-  camera.position.y = damp(camera.position.y, ty, lambda * 0.75, dt);
-  camera.position.x = 0;
+  if (!started) { camBaseY = camera.position.y; camBaseZ = camera.position.z; }
+  camBaseZ = damp(camBaseZ, tz, lambda, dt);
+  camBaseY = damp(camBaseY, ty, lambda * 0.75, dt);
+
+  // impact shake and dip
+  var sx = 0, sy = 0;
+  if (shakeT > 0) {
+    shakeT -= dt;
+    var k = Math.max(shakeT / 0.35, 0);
+    var s = shakeAmp * k * k;
+    sx = Math.sin(camT * 71) * s * 0.14;
+    sy = Math.sin(camT * 57 + 1.3) * s * 0.1;
+    if (shakeT <= 0) shakeAmp = 0;
+  }
+  camDip = damp(camDip, 0, 9, dt);
+  camera.position.set(sx, camBaseY - camDip + sy, camBaseZ);
+
+  // the view widens a little with speed, and with a big swing
+  var speedK = clamp(player.vz / RUN_SPEED, 0, 1.4);
+  var swingK = (player.hang && player.hang.kind === "pend") ? Math.abs(player.omega) * 1.1 : 0;
+  camFov = damp(camFov, 58 + speedK * 4 + swingK, 6, dt);
+  if (Math.abs(camFov - camera.fov) > 0.02) {
+    camera.fov = camFov;
+    camera.updateProjectionMatrix();
+  }
+
   camLookY = damp(camLookY, player.y + 1.4, 6, dt);
-  camLookZ = damp(camLookZ, player.z + 5.0, 8, dt);
+  camLookZ = damp(camLookZ, player.z + 5.0 + speedK * 1.5, 8, dt);
   camera.lookAt(0, camLookY, camLookZ);
   started = true;
 
@@ -2192,8 +2322,11 @@ function updateCamera(dt) {
   sun.target.updateMatrixWorld();
 }
 
-function syncNinja() {
-  ninja.position.set(0, player.y, player.z);
+function syncNinja(dt) {
+  // the grab offset eases out over roughly a sixth of a second
+  player.visOffZ = damp(player.visOffZ, 0, 13, dt);
+  player.visOffY = damp(player.visOffY, 0, 13, dt);
+  ninja.position.set(0, player.y + player.visOffY, player.z + player.visOffZ);
 }
 
 // hanging ropes sway gently on their own, and follow the player when held
@@ -2235,7 +2368,9 @@ function frame(now) {
     acc -= 1 / 120;
   }
 
-  syncNinja();
+  poseBlendT += dt;
+  updatePony(dt);
+  syncNinja(dt);
   animateRopes(now, dt);
   updateCamera(dt);
   updateNearFade(dt);
@@ -2290,7 +2425,7 @@ function boot() {
   initBalloons(0);
   camera.position.set(0, 4.6, -8.4);
   camLookY = 1.4; camLookZ = 9;
-  syncNinja();
+  syncNinja(0.016);
   requestAnimationFrame(frame);
 }
 
