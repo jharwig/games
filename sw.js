@@ -1,5 +1,5 @@
 /* Service worker: makes the site available offline. */
-var CACHE = "games-v1";
+var CACHE = "games-v2";
 
 var PRECACHE = [
   "./",
