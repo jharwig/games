@@ -296,11 +296,15 @@ var AIR_ACCEL    = 26;      // units / s^2 toward RUN_SPEED while holding forwar
 var AIR_DRAG     = 1.2;     // units / s^2 when not holding forward
 var COYOTE       = 0.13;    // s of grace after leaving a ledge
 var JUMP_BUFFER  = 0.16;    // s a jump press stays queued
+var JUMP_CUT     = 0.45;    // vy is scaled by this when jump is let go on the way up
+var JUMP_HOLD_MIN= 0.08;    // s of guaranteed rise, so a tap still hops a useful amount
 var MAX_FALL     = 34;      // terminal velocity
 var HAND_H       = 1.95;    // height of the hands above the feet when reaching
 var EDGE_GRACE   = 0.38;    // forgiving landing overhang
 var FALL_LIMIT   = 17;      // units below the spawn before it counts as a fall
 var FLIP_SPEED   = 11.4;    // rad / s (about 1.6 flips per full jump)
+var TRICK_SPIN   = 16;      // rad / s, the fastest an air trick is allowed to turn
+var TRICK_MIN    = 0.34;    // s of airtime below which a trick is a pose only
 var CLIMB_SPEED  = 3.6;
 var RAIL_SPEED   = 4.4;
 var RELEASE_LOCK = 0.42;    // s before the player can grab again
@@ -888,7 +892,11 @@ function limb(parent, x, y, w, h, d, hex) {
 var player = {
   z: 0, y: 0, vz: 0, vy: 0,
   onGround: false, coyote: 0, jumpBuf: 0,
+  jumpCut: false, jumpHold: 0,   // variable jump height: armed while the rise can still be cut
   flip: 0, runPhase: 0, stepT: 0,
+  twist: 0,            // yaw held by a spin trick
+  trick: null,         // active air trick, see startTrick()
+  armSpread: 0, legSpread: 0,   // sideways limb spread for star / straddle poses
   hang: null,          // active grab object
   hangT: 0,
   theta: 0, omega: 0,  // pendulum state
@@ -898,7 +906,8 @@ var player = {
 };
 
 var ninja = new THREE.Group();
-var ninjaFlip = new THREE.Group();      // rotates for the somersault
+var ninjaFlip = new THREE.Group();      // rotates for the somersault and the spin
+ninjaFlip.rotation.order = "YXZ";       // yaw first, so a flip + spin combo reads right
 ninjaFlip.position.y = 1.0;
 ninja.add(ninjaFlip);
 var ninjaBody = new THREE.Group();      // feet back at y = 0
@@ -1311,8 +1320,11 @@ function showTip(text, secs) {
 // =============================================================================
 var input = { forward: false, jump: false, jumpEdge: false };
 var keyForward = false, touchForward = false;
+var keyJump = false;
+var jumpPointers = new Set();
 
 function setForward() { input.forward = keyForward || touchForward; }
+function setJump() { input.jump = keyJump || jumpPointers.size > 0; }
 
 function pressJump() {
   input.jumpEdge = true;
@@ -1328,7 +1340,7 @@ window.addEventListener("keydown", function (e) {
   if (k === "w" || k === "W" || k === "ArrowUp") {
     keyForward = true; setForward(); e.preventDefault(); anyInput();
   } else if (k === " " || e.code === "Space" || k === "ArrowRight" || k === "Enter") {
-    pressJump(); e.preventDefault(); anyInput();
+    keyJump = true; setJump(); pressJump(); e.preventDefault(); anyInput();
   } else if (k === "m" || k === "M") {
     initAudio(); audio.muted = !audio.muted; applyMute(); e.preventDefault();
   } else {
@@ -1339,9 +1351,12 @@ window.addEventListener("keydown", function (e) {
 window.addEventListener("keyup", function (e) {
   var k = e.key;
   if (k === "w" || k === "W" || k === "ArrowUp") { keyForward = false; setForward(); }
+  else if (k === " " || e.code === "Space" || k === "ArrowRight" || k === "Enter") {
+    keyJump = false; setJump();
+  }
 }, { passive: true });
 
-// touch / mouse: hold the left half to run, tap the right half to jump
+// touch / mouse: hold the left half to run, hold the right half for a higher jump
 var forwardPointers = new Set();
 
 function pointerSide(e) {
@@ -1357,6 +1372,8 @@ renderer.domElement.addEventListener("pointerdown", function (e) {
     touchForward = true;
     setForward();
   } else {
+    jumpPointers.add(e.pointerId);
+    setJump();
     pressJump();
   }
   if (e.pointerType !== "mouse") e.preventDefault();
@@ -1367,12 +1384,15 @@ function endPointer(e) {
     touchForward = forwardPointers.size > 0;
     setForward();
   }
+  if (jumpPointers.delete(e.pointerId)) setJump();
 }
 window.addEventListener("pointerup", endPointer, { passive: true });
 window.addEventListener("pointercancel", endPointer, { passive: true });
 window.addEventListener("blur", function () {
   forwardPointers.clear();
   touchForward = false; keyForward = false; setForward();
+  jumpPointers.clear();
+  keyJump = false; setJump();
 }, { passive: true });
 
 // stop the page from scrolling / zooming around the canvas
@@ -1474,8 +1494,10 @@ function tryGrab(radius) {
 function attach(g) {
   player.hang = g;
   player.flip = 0;
+  endTrick();            // no tricks while hanging, swinging or climbing
   player.hangT = 0;
   player.jumpBuf = 0;         // the press that grabbed must not also let go
+  player.jumpCut = false;     // a grab ends the jump, so the lache is never cut
   sfxGrab();
   if (g.kind === "pend") {
     var dz = player.z - g.pz;
@@ -1524,6 +1546,7 @@ function release(boost) {
   player.vz = clamp(player.vz, -6, 15);
   player.vy = clamp(player.vy, -14, 14);
   player.hang = null;
+  endTrick();            // a lache keeps its own tumble, it is not a free jump
   player.releaseLock = RELEASE_LOCK;
   player.air = 0.2;
   sfxWhoosh();
@@ -1574,6 +1597,8 @@ function respawn() {
   player.coyote = COYOTE;
   player.jumpBuf = 0;
   player.flip = 0;
+  player.twist = 0;
+  endTrick();
   player.releaseLock = 0;
   player.air = 0;
   player.lastGroundY = spawn.y;
@@ -1600,6 +1625,7 @@ function completeLevel() {
   player.vz = 0; player.vy = 0;
   player.hang = null;
   player.flip = 0;
+  endTrick();
 
   var p = current.podium;
   burstConfetti(0, p.y + 1.0, p.z);
@@ -1643,6 +1669,7 @@ function endCelebrate() {
 function startFall() {
   state = FALLING;
   fallT = 0;
+  endTrick();
   player.hang = null;
   sfxFall();
   fallMsg.classList.add("visible");
@@ -1756,6 +1783,9 @@ function updateFree(dt, jumpPressed) {
     player.coyote = 0;
     player.jumpBuf = 0;
     player.air = 0;
+    player.jumpCut = true;   // a short press can still cut this rise short
+    player.jumpHold = 0;
+    startTrick(JUMP_V);      // a fresh random trick for every free jump
     sfxJump();
     puff(0, player.y + 0.05, player.z, 5, 0.3, 1.4);
   } else if (jumpPressed || player.jumpBuf > 0) {
@@ -1763,6 +1793,18 @@ function updateFree(dt, jumpPressed) {
     if (tryGrab(2.1 - 0.5 * (current ? current.d : 0))) {
       player.jumpBuf = 0;
       return;
+    }
+  }
+
+  // variable jump height: hold for the full arc, let go early for a hop
+  if (player.jumpCut) {
+    player.jumpHold += dt;
+    if (player.vy <= 0) {
+      player.jumpCut = false;
+    } else if (!input.jump && player.jumpHold >= JUMP_HOLD_MIN) {
+      player.vy *= JUMP_CUT;
+      player.jumpCut = false;
+      trimTrick(player.vy);  // a hop gets a quick trick, or just a pose
     }
   }
 
@@ -1799,6 +1841,7 @@ function updateFree(dt, jumpPressed) {
         sfxLand();
         puff(0, p.y, player.z, 8, 0.4, 2.0);
         squashT = 0.16;
+        endTrick();          // poseRun eases the body back upright from here
       }
       player.onGround = true;
       player.lastGroundY = p.y;
@@ -1831,10 +1874,91 @@ function updateFree(dt, jumpPressed) {
 function roundTo2Pi(a) { return Math.round(a / (Math.PI * 2)) * Math.PI * 2; }
 
 // =============================================================================
+// air tricks: every free jump picks one at random
+//
+// flips  = whole turns around X (negative goes backwards)
+// twists = whole turns around Y
+// arms / legs = held pose, armZ / legZ = how far the limbs spread sideways
+// turns are always whole, so the body lands upright and facing forward
+// =============================================================================
+var TRICKS = [
+  { name: "front tuck",     flips:  1, twists: 0, arms: [-2.30, -2.30], legs: [-1.15, -0.85], armZ: 0.15, legZ: 0.12, head:  0.25 },
+  { name: "front layout",   flips:  1, twists: 0, arms: [-3.00, -3.00], legs: [ 0.12, -0.12], armZ: 0.10, legZ: 0.05, head:  0.10 },
+  { name: "back tuck",      flips: -1, twists: 0, arms: [-2.10, -2.10], legs: [-1.20, -0.90], armZ: 0.20, legZ: 0.15, head: -0.20 },
+  { name: "back layout",    flips: -1, twists: 0, arms: [-2.90, -2.90], legs: [ 0.10, -0.10], armZ: 0.50, legZ: 0.08, head: -0.25 },
+  { name: "360 spin",       flips:  0, twists: 1, arms: [-1.90, -1.90], legs: [-0.50, -0.30], armZ: 0.35, legZ: 0.10, head:  0.00 },
+  { name: "720 spin",       flips:  0, twists: 2, arms: [-1.50, -1.50], legs: [-0.35, -0.20], armZ: 0.20, legZ: 0.05, head:  0.00 },
+  { name: "star",           flips:  0, twists: 0, arms: [-1.20, -1.20], legs: [ 0.10, -0.10], armZ: 1.35, legZ: 0.50, head: -0.15 },
+  { name: "straddle",       flips:  0, twists: 0, arms: [-1.70, -1.70], legs: [-0.20, -0.20], armZ: 0.90, legZ: 0.80, head:  0.05 },
+  { name: "flip + spin",    flips:  1, twists: 1, arms: [-2.40, -2.40], legs: [-1.20, -0.95], armZ: 0.10, legZ: 0.10, head:  0.20 },
+  { name: "spin + arms out",flips:  0, twists: 1, arms: [-1.35, -1.35], legs: [ 0.15, -0.15], armZ: 1.30, legZ: 0.35, head:  0.00 },
+  { name: "back tuck spin", flips: -1, twists: 1, arms: [-2.20, -2.20], legs: [-1.25, -0.95], armZ: 0.15, legZ: 0.10, head: -0.15 }
+];
+
+// the pose the body passes through on the way in and on the way out of a trick
+var PREP = { arms: [-0.55, -0.55], legs: [0.30, -0.25], head: 0.05 };
+
+var lastTrick = -1;
+
+function pickTrick() {
+  var i = (Math.random() * TRICKS.length) | 0;
+  if (i === lastTrick) i = (i + 1 + ((Math.random() * (TRICKS.length - 1)) | 0)) % TRICKS.length;
+  lastTrick = i;
+  return TRICKS[i];
+}
+
+// keep only the whole turns that still fit in the time left in the air
+function fitTrick(remaining) {
+  var tr = player.trick;
+  if (!tr) return;
+  var want = Math.abs(tr.def.flips) + Math.abs(tr.def.twists);
+  var budget = remaining * TRICK_SPIN / (Math.PI * 2);
+  var s = (want > 0 && budget < want) ? budget / want : 1;
+  if (remaining < TRICK_MIN) s = 0;
+  // + 0.12 so a jump that is only just too short still keeps its turn
+  tr.flips  = Math.sign(tr.def.flips)  * Math.floor(Math.abs(tr.def.flips)  * s + 0.12);
+  tr.twists = Math.sign(tr.def.twists) * Math.floor(Math.abs(tr.def.twists) * s + 0.12);
+}
+
+function startTrick(vy) {
+  var dur = Math.max(TRICK_MIN, 2 * vy / GRAVITY);   // rise + fall back to the take off height
+  player.trick = { def: pickTrick(), t: 0, dur: dur, flips: 0, twists: 0, x0: player.flip, y0: player.twist };
+  fitTrick(dur);
+}
+
+// the jump was cut short, so re-time the trick against the airtime that is left
+function trimTrick(vy) {
+  var tr = player.trick;
+  if (!tr) return;
+  var remaining = Math.max(0.12, 2 * vy / GRAVITY);
+  tr.dur = Math.max(TRICK_MIN, tr.t + remaining);
+  // turns are only dropped early on, or the body would snap backwards mid air
+  if (tr.t / tr.dur < 0.3) fitTrick(tr.dur);
+}
+
+function endTrick() { player.trick = null; }
+
+function smoothstep(p) { return p * p * (3 - 2 * p); }
+
+// =============================================================================
 // character posing
 // =============================================================================
-function setArms(a, b) { armL.rotation.x = a; armR.rotation.x = b; }
-function setLegs(a, b) { legL.rotation.x = a; legR.rotation.x = b; }
+function setArms(a, b) {
+  armL.rotation.x = a; armR.rotation.x = b;
+  armL.rotation.z = -player.armSpread; armR.rotation.z = player.armSpread;
+}
+function setLegs(a, b) {
+  legL.rotation.x = a; legR.rotation.x = b;
+  legL.rotation.z = -player.legSpread; legR.rotation.z = player.legSpread;
+}
+
+// every pose that is not a trick eases the spin and the spread back to normal
+function settleTrick(dt) {
+  player.twist = damp(player.twist, roundTo2Pi(player.twist), 16, dt);
+  player.armSpread = damp(player.armSpread, 0, 16, dt);
+  player.legSpread = damp(player.legSpread, 0, 16, dt);
+  ninjaFlip.rotation.y = player.twist;
+}
 
 function poseRun(dt) {
   var speed = Math.abs(player.vz);
@@ -1847,6 +1971,7 @@ function poseRun(dt) {
   ninjaBody.position.y = -1.0 + Math.abs(Math.sin(player.runPhase)) * 0.07 * s;
   player.flip = damp(player.flip, roundTo2Pi(player.flip), 18, dt);
   ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
   // footsteps
   player.stepT -= dt * (3.0 + speed * 1.5);
   if (s > 0.35 && player.stepT <= 0) {
@@ -1860,19 +1985,43 @@ function poseRun(dt) {
 }
 
 function poseAir(dt) {
-  player.flip += FLIP_SPEED * dt;
-  ninjaFlip.rotation.x = player.flip;
-  // tuck
-  setLegs(-1.15, -0.85);
-  setArms(-2.3, -2.3);
-  head.rotation.x = 0.25;
+  var tr = player.trick;
   ninjaBody.position.y = -1.0;
   ninjaBody.scale.set(0.97, 1.05, 0.97);
+
+  if (!tr) {
+    // no trick: the plain tumble, used for lache releases and for falls
+    player.flip += FLIP_SPEED * dt;
+    ninjaFlip.rotation.x = player.flip;
+    settleTrick(dt);
+    setLegs(-1.15, -0.85);
+    setArms(-2.3, -2.3);
+    head.rotation.x = 0.25;
+    return;
+  }
+
+  tr.t += dt;
+  var p = clamp(tr.t / tr.dur, 0, 1);
+  var e = smoothstep(p);
+  player.flip = tr.x0 + tr.flips * Math.PI * 2 * e;
+  player.twist = tr.y0 + tr.twists * Math.PI * 2 * e;
+  ninjaFlip.rotation.x = player.flip;
+  ninjaFlip.rotation.y = player.twist;
+
+  // the pose fades in at the take off and back out before the landing
+  var k = clamp(Math.min(tr.t / 0.14, (1 - p) / 0.22), 0, 1);
+  var d = tr.def;
+  player.armSpread = d.armZ * k;
+  player.legSpread = d.legZ * k;
+  setArms(lerp(PREP.arms[0], d.arms[0], k), lerp(PREP.arms[1], d.arms[1], k));
+  setLegs(lerp(PREP.legs[0], d.legs[0], k), lerp(PREP.legs[1], d.legs[1], k));
+  head.rotation.x = lerp(PREP.head, d.head, k);
 }
 
 function poseHang(dt, tilt) {
   player.flip = damp(player.flip, 0, 16, dt);
   ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
   setArms(Math.PI * 0.97, Math.PI * 0.97);
   var k = Math.sin(performance.now() * 0.004) * 0.15;
   setLegs(0.35 + k - tilt, 0.1 - k - tilt);
@@ -1884,6 +2033,7 @@ function poseHang(dt, tilt) {
 function poseRail(dt) {
   player.flip = damp(player.flip, 0, 16, dt);
   ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
   player.runPhase += dt * 7;
   var sw = Math.sin(player.runPhase) * 0.22;
   setArms(Math.PI * 0.97 + sw, Math.PI * 0.97 - sw);
@@ -1896,6 +2046,7 @@ function poseRail(dt) {
 function poseClimb(dt) {
   player.flip = damp(player.flip, 0, 16, dt);
   ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
   player.runPhase += dt * 8;
   var sw = Math.sin(player.runPhase) * 0.3;
   setArms(Math.PI * 0.94 + sw, Math.PI * 0.94 - sw);
@@ -1908,6 +2059,7 @@ function poseClimb(dt) {
 function poseCelebrate(dt) {
   player.flip = damp(player.flip, 0, 14, dt);
   ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
   var k = Math.sin(celebrateT * 8) * 0.25;
   setArms(-2.6 + k, -2.6 - k);
   setLegs(0.15, -0.15);
@@ -1923,6 +2075,8 @@ function idleNinja(dt) {
   setLegs(0.1, -0.1);
   head.rotation.x = 0;
   ninjaFlip.rotation.x = 0;
+  player.twist = 0; player.armSpread = 0; player.legSpread = 0;
+  ninjaFlip.rotation.y = 0;
   ninjaBody.position.y = -1.0 + Math.sin(player.runPhase * 1.4) * 0.04;
   ninjaBody.scale.set(1, 1, 1);
 }
