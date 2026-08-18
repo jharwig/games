@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Block</title>
 <style>
   html, body {
@@ -53,15 +53,29 @@
   killSmoothing(ctx);
 
   function fitScale() {
-    var sh = Math.floor((window.innerHeight - 16) / H);
-    var sw = Math.floor((window.innerWidth - 16) / W);
-    var s = Math.min(sh, sw, 4);
-    if (!isFinite(s) || s < 1) s = 1;
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    if (window.visualViewport) {
+      vw = window.visualViewport.width;
+      vh = window.visualViewport.height;
+    }
+    // keep a small margin on large (desktop) screens only
+    var margin = (vw < W * 3 || vh < H * 3) ? 0 : 16;
+    var dpr = window.devicePixelRatio || 1;
+    // snap the scale to whole device pixels so the art stays sharp, but
+    // fill as much of the screen as possible (important on phones, where
+    // whole CSS-pixel steps waste a lot of space)
+    var s = Math.min((vw - margin) * dpr / W, (vh - margin) * dpr / H);
+    s = Math.floor(s) / dpr;
+    if (!isFinite(s) || s <= 0) s = 1;
+    if (s > 4) s = 4;
     canvas.style.width = (W * s) + "px";
     canvas.style.height = (H * s) + "px";
   }
   fitScale();
   window.addEventListener("resize", fitScale);
+  window.addEventListener("orientationchange", fitScale);
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", fitScale);
 
   // =========================================================================
   // palette (from the approved mockup)
