@@ -30,10 +30,38 @@
     display: block;
     box-shadow: 0 0 0 2px #1d1d2a, 0 12px 40px rgba(0,0,0,0.8);
   }
+  #pauseBtn {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    right: calc(env(safe-area-inset-right, 0px) + 10px);
+    width: 38px;
+    height: 38px;
+    padding: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    background: rgba(10,10,16,0.72);
+    border: 2px solid #1d1d2a;
+    border-radius: 6px;
+    cursor: pointer;
+    z-index: 10;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  #pauseBtn.visible { display: flex; }
+  #pauseBtn:active { background: rgba(29,29,42,0.92); }
+  #pauseBtn .bar {
+    width: 5px;
+    height: 16px;
+    background: #ffffff;
+    border-radius: 1px;
+  }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+<button id="pauseBtn" type="button" aria-label="Pause"><span class="bar"></span><span class="bar"></span></button>
 <!-- iOS haptic hack: a programmatic toggle of a switch-style checkbox makes a haptic tap on iOS 17.4+ -->
 <label id="haptic" style="position:fixed;left:-9999px;top:0" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
 <script>
@@ -50,6 +78,7 @@
   canvas.height = H;
 
   var ctx = canvas.getContext("2d");
+  var pauseBtn = document.getElementById("pauseBtn");
 
   function killSmoothing(c) {
     c.imageSmoothingEnabled = false;
@@ -636,7 +665,7 @@
   // =========================================================================
   // game state
   // =========================================================================
-  var TITLE = 0, PLAYING = 1, DEAD = 2;
+  var TITLE = 0, PLAYING = 1, DEAD = 2, PAUSED = 3;
 
   var GRAVITY   = 520;    // px/s^2
   var FLAP      = -155;   // px/s impulse
@@ -699,6 +728,7 @@
     player.tilt = 0;
     spawnColumn(W + 20);
     startMusic();
+    setPauseButtonVisible(true);
   }
 
   function toTitle() {
@@ -708,6 +738,32 @@
     player.vy = 0;
     player.tilt = 0;
     stopMusic();
+    setPauseButtonVisible(false);
+  }
+
+  // =========================================================================
+  // pause
+  // =========================================================================
+  function setPauseButtonVisible(v) {
+    pauseBtn.classList.toggle("visible", v);
+  }
+
+  function pauseGame() {
+    if (state !== PLAYING) return;
+    state = PAUSED;
+    if (audio.ctx && audio.ctx.state === "running") audio.ctx.suspend();
+  }
+
+  function resumeGame() {
+    if (state !== PAUSED) return;
+    state = PLAYING;
+    last = 0;   // drop the accumulated real-time gap so no physics leap occurs
+    if (audio.ctx && audio.ctx.state === "suspended") audio.ctx.resume();
+  }
+
+  function togglePause() {
+    if (state === PLAYING) pauseGame();
+    else if (state === PAUSED) resumeGame();
   }
 
   function spawnColumn(x) {
@@ -907,6 +963,7 @@
     shakeT = SHAKE_DUR;
     abT = AB_DUR;
     stopMusic();
+    setPauseButtonVisible(false);
     sfxExplosion();
     if (navigator.vibrate) {
       navigator.vibrate([90, 40, 60]);
@@ -1165,6 +1222,19 @@
       if (blink) drawText("TO START", W / 2, 114, 1, P.hud, P.hudShadow);
     } else if (state === PLAYING) {
       drawText(String(score), W / 2, 14, 5, P.hud, P.hudShadow);
+    } else if (state === PAUSED) {
+      drawText(String(score), W / 2, 14, 5, P.hud, P.hudShadow);
+      ctx.fillStyle = "rgba(5,6,15,0.78)";
+      ctx.fillRect(14, 108, W - 28, 72);
+      px(14, 108, W - 28, 1, "#2a2f4c");
+      px(14, 179, W - 28, 1, "#2a2f4c");
+      px(14, 108, 1, 72, "#2a2f4c");
+      px(W - 15, 108, 1, 72, "#2a2f4c");
+      drawText("PAUSED", W / 2, 122, 3, P.hud, P.hudShadow);
+      // clock is frozen while paused, so blink off real time instead
+      if (Math.floor(performance.now() / 500) % 2 === 0) {
+        drawText("TAP TO RESUME", W / 2, 156, 1, "#9aa3c8", P.hudShadow);
+      }
     } else {
       drawText(String(score), W / 2, 14, 5, P.hud, P.hudShadow);
       if (deadTime >= DEAD_LOCK) {
@@ -1204,6 +1274,7 @@
   // input
   // =========================================================================
   function onPress() {
+    if (state === PAUSED) return;
     initAudio();
     if (state === TITLE) {
       startGame();
@@ -1222,6 +1293,17 @@
     onPress();
   }, { passive: false });
 
+  // pause button - stop the tap/click from also reaching the document
+  // handlers above and acting as game input
+  function onPauseBtn(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    initAudio();
+    togglePause();
+  }
+  pauseBtn.addEventListener("mousedown", onPauseBtn);
+  pauseBtn.addEventListener("touchstart", onPauseBtn, { passive: false });
+
   window.addEventListener("keydown", function (e) {
     if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
       e.preventDefault();
@@ -1233,12 +1315,17 @@
       audio.muted = !audio.muted;
       initAudio();
       applyMute();
+      return;
+    }
+    if (e.key === "p" || e.key === "P" || e.key === "Escape") {
+      if (e.repeat) return;
+      togglePause();
     }
   });
 
   // avoid a stuck loop / silent audio after a tab switch
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden && audio.ctx && audio.ctx.state === "suspended") audio.ctx.resume();
+    if (!document.hidden && state !== PAUSED && audio.ctx && audio.ctx.state === "suspended") audio.ctx.resume();
     last = 0;
   });
 
@@ -1248,6 +1335,15 @@
   var last = 0, acc = 0;
 
   function frame(ts) {
+    if (state === PAUSED) {
+      // keep resyncing so the eventual resume sees a normal, small dt
+      // instead of one huge stall covering the whole paused span
+      last = ts;
+      acc = 0;
+      render();
+      requestAnimationFrame(frame);
+      return;
+    }
     if (!last) last = ts;
     var dt = (ts - last) / 1000;
     last = ts;
