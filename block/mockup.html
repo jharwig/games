@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Block - Mockup</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0a0a10;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+    box-shadow: 0 0 0 2px #1d1d2a, 0 12px 40px rgba(0,0,0,0.8);
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+(function () {
+  "use strict";
+
+  // ---- internal pixel resolution + scale ----------------------------------
+  var W = 160, H = 288, SCALE = 4;
+
+  var canvas = document.getElementById("game");
+  canvas.width = W;
+  canvas.height = H;
+  canvas.style.width = (W * SCALE) + "px";
+  canvas.style.height = (H * SCALE) + "px";
+
+  var ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = false;
+  ctx.mozImageSmoothingEnabled = false;
+  ctx.webkitImageSmoothingEnabled = false;
+  ctx.msImageSmoothingEnabled = false;
+
+  // ---- palette ------------------------------------------------------------
+  var P = {
+    skyTop:      "#05060f",
+    skyMid:      "#0b1024",
+    skyLow:      "#141b38",
+    skyHaze:     "#20264a",
+    star:        "#f2f4ff",
+    starDim:     "#9aa3c8",
+    moon:        "#f6f0d8",
+    moonShade:   "#d8d0ae",
+    moonCrater:  "#c4bb96",
+    farBldg:     "#0e1226",
+    farWin:      "#3a4270",
+    nearBldg:    "#171b30",
+    nearBldgTop: "#232842",
+    win:         "#ffd166",
+    winDim:      "#c79a3c",
+    ground:      "#101018",
+    groundTop:   "#1c1c2a",
+    groundLine:  "#2a2a3c",
+    blockFace:   "#6b4a2f",
+    blockLight:  "#8f6540",
+    blockDark:   "#3f2a19",
+    blockOutline:"#140d08",
+    blockGrey:   "#4a4a52",
+    greyLight:   "#63636d",
+    greyDark:    "#2b2b31",
+    hero:        "#ff8c3b",
+    heroLight:   "#ffb469",
+    heroDark:    "#b8541a",
+    heroOutline: "#301206",
+    prop:        "#cfd6e6",
+    propBlur:    "#7d8699",
+    hud:         "#ffffff",
+    hudShadow:   "#000000"
+  };
+
+  function px(x, y, w, h, c) {
+    ctx.fillStyle = c;
+    ctx.fillRect(x | 0, y | 0, w | 0, h | 0);
+  }
+
+  // deterministic PRNG (mulberry32)
+  function rng(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // ---- sky bands ----------------------------------------------------------
+  px(0, 0, W, H, P.skyTop);
+  px(0, 60, W, 70, P.skyMid);
+  px(0, 130, W, 70, P.skyLow);
+  px(0, 200, W, 40, P.skyHaze);
+  // soft banding steps between zones
+  px(0, 56, W, 4, "#080a18");
+  px(0, 126, W, 4, "#101636");
+  px(0, 196, W, 4, "#1a2042");
+
+  // ---- stars --------------------------------------------------------------
+  var r = rng(1337);
+  for (var i = 0; i < 90; i++) {
+    var sx = Math.floor(r() * W);
+    var sy = Math.floor(r() * 205);
+    var bright = r();
+    // fade stars out toward the horizon haze
+    if (sy > 150 && bright < 0.6) continue;
+    if (bright > 0.85) {
+      px(sx, sy, 1, 1, P.star);
+      px(sx - 1, sy, 1, 1, P.starDim);
+      px(sx + 1, sy, 1, 1, P.starDim);
+      px(sx, sy - 1, 1, 1, P.starDim);
+      px(sx, sy + 1, 1, 1, P.starDim);
+    } else if (bright > 0.5) {
+      px(sx, sy, 1, 1, P.star);
+    } else {
+      px(sx, sy, 1, 1, P.starDim);
+    }
+  }
+
+  // ---- moon (upper left, full with craters) -------------------------------
+  (function moon() {
+    var cx = 30, cy = 46, rad = 15;
+    for (var y = -rad; y <= rad; y++) {
+      for (var x = -rad; x <= rad; x++) {
+        var d = x * x + y * y;
+        if (d > rad * rad) continue;
+        // shade the lower-right limb
+        var c = (x + y > rad * 0.75) ? P.moonShade : P.moon;
+        px(cx + x, cy + y, 1, 1, c);
+      }
+    }
+    function crater(ox, oy, cr) {
+      for (var y = -cr; y <= cr; y++)
+        for (var x = -cr; x <= cr; x++)
+          if (x * x + y * y <= cr * cr) px(cx + ox + x, cy + oy + y, 1, 1, P.moonCrater);
+    }
+    crater(-5, -4, 3);
+    crater(4, 2, 4);
+    crater(-3, 6, 2);
+    crater(7, -6, 2);
+    // faint halo
+    ctx.fillStyle = "rgba(246,240,216,0.05)";
+    for (var y2 = -rad - 3; y2 <= rad + 3; y2++)
+      for (var x2 = -rad - 3; x2 <= rad + 3; x2++) {
+        var dd = x2 * x2 + y2 * y2;
+        if (dd > rad * rad && dd <= (rad + 3) * (rad + 3))
+          ctx.fillRect(cx + x2, cy + y2, 1, 1);
+      }
+  })();
+
+  var GROUND_Y = 262;   // top of the pavement strip
+  var FAR_BASE = 236;   // baseline of far skyline
+  var NEAR_BASE = 262;  // baseline of near skyline
+
+  // ---- far skyline (darker, parallax back layer) --------------------------
+  (function farSkyline() {
+    var rf = rng(77);
+    var x = -4;
+    while (x < W + 4) {
+      var w = 10 + Math.floor(rf() * 14);
+      var h = 16 + Math.floor(rf() * 34);
+      var top = FAR_BASE - h;
+      px(x, top, w, h, P.farBldg);
+      // occasional antenna
+      if (rf() > 0.75) px(x + (w >> 1), top - 5, 1, 5, P.farBldg);
+      // dim windows
+      for (var wy = top + 3; wy < FAR_BASE - 3; wy += 5) {
+        for (var wx = x + 2; wx < x + w - 2; wx += 4) {
+          if (rf() > 0.72) px(wx, wy, 1, 2, P.farWin);
+        }
+      }
+      x += w + 1 + Math.floor(rf() * 3);
+    }
+  })();
+
+  // ---- near skyline (lighter, parallax front layer) -----------------------
+  (function nearSkyline() {
+    var rn = rng(2024);
+    var x = -6;
+    while (x < W + 6) {
+      var w = 14 + Math.floor(rn() * 18);
+      var h = 22 + Math.floor(rn() * 30);
+      var top = NEAR_BASE - h;
+      px(x, top, w, h, P.nearBldg);
+      px(x, top, w, 1, P.nearBldgTop);       // lit roof edge
+      px(x, top, 1, h, P.nearBldgTop);       // lit left edge
+      // water tower / antenna details
+      if (rn() > 0.7) {
+        px(x + 3, top - 4, 4, 4, P.nearBldg);
+        px(x + 3, top - 4, 4, 1, P.nearBldgTop);
+      }
+      // lit yellow windows
+      for (var wy = top + 4; wy < NEAR_BASE - 4; wy += 6) {
+        for (var wx = x + 3; wx < x + w - 3; wx += 5) {
+          var k = rn();
+          if (k > 0.55) px(wx, wy, 2, 3, k > 0.8 ? P.win : P.winDim);
+        }
+      }
+      x += w + 2 + Math.floor(rn() * 4);
+    }
+  })();
+
+  // ---- ground strip -------------------------------------------------------
+  px(0, GROUND_Y, W, H - GROUND_Y, P.ground);
+  px(0, GROUND_Y, W, 2, P.groundTop);
+  px(0, GROUND_Y + 3, W, 1, "#15151f");
+  // lane dashes / asphalt speckle
+  for (var dx = 2; dx < W; dx += 12) px(dx, GROUND_Y + 10, 6, 1, P.groundLine);
+  var rg = rng(909);
+  for (var s = 0; s < 70; s++) {
+    px(Math.floor(rg() * W), GROUND_Y + 5 + Math.floor(rg() * (H - GROUND_Y - 6)), 1, 1, "#1a1a26");
+  }
+
+  // ---- obstacle block columns --------------------------------------------
+  var CELL = 12;      // one stacked block is 12x12
+  var COL_W = 24;     // column is 2 blocks wide
+
+  function drawBlock(x, y, tone) {
+    var face, light, dark;
+    if (tone === "brown")      { face = P.blockFace; light = P.blockLight; dark = P.blockDark; }
+    else if (tone === "grey")  { face = P.blockGrey; light = P.greyLight;  dark = P.greyDark; }
+    else                       { face = "#232326";   light = "#35353a";    dark = "#111113"; }
+
+    px(x, y, CELL, CELL, face);
+    px(x, y, CELL, 1, light);              // top highlight
+    px(x, y, 1, CELL, light);              // left highlight
+    px(x, y + CELL - 2, CELL, 2, dark);    // bottom shade
+    px(x + CELL - 2, y, 2, CELL, dark);    // right shade
+    px(x, y, CELL, 1, P.blockOutline);     // thin outlines
+    px(x, y + CELL - 1, CELL, 1, P.blockOutline);
+    px(x, y, 1, CELL, P.blockOutline);
+    px(x + CELL - 1, y, 1, CELL, P.blockOutline);
+    px(x + 1, y + 1, CELL - 3, 1, light);
+    px(x + 1, y + 1, 1, CELL - 3, light);
+  }
+
+  // pick a tone deterministically per block cell
+  function toneFor(col, row) {
+    var t = (col * 7 + row * 5) % 6;
+    if (t < 3) return "brown";
+    if (t < 5) return "grey";
+    return "black";
+  }
+
+  // columns: x position, gap top, gap height
+  var columns = [
+    { x: 22,  gapTop: 96,  gapH: 72 },
+    { x: 82,  gapTop: 106, gapH: 72 },
+    { x: 142, gapTop: 132, gapH: 72 }
+  ];
+
+  columns.forEach(function (col, ci) {
+    // top stack: from y=0 down to gapTop
+    var y = col.gapTop - CELL;
+    var row = 0;
+    while (y > -CELL) {
+      for (var b = 0; b < COL_W / CELL; b++) drawBlock(col.x + b * CELL, y, toneFor(ci * 3 + b, row));
+      y -= CELL;
+      row++;
+    }
+    // bottom stack: from gap bottom down to the ground line
+    var by = col.gapTop + col.gapH;
+    row = 0;
+    while (by < GROUND_Y) {
+      for (var b2 = 0; b2 < COL_W / CELL; b2++) drawBlock(col.x + b2 * CELL, by, toneFor(ci * 3 + b2 + 1, row + 4));
+      by += CELL;
+      row++;
+    }
+    // cast a subtle dark edge on the sky beside each column
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.fillRect(col.x + COL_W, 0, 2, col.gapTop);
+    ctx.fillRect(col.x + COL_W, col.gapTop + col.gapH, 2, GROUND_Y - (col.gapTop + col.gapH));
+  });
+
+  // ---- player: orange cube with helicopter propeller ----------------------
+  (function player() {
+    var bx = 50, by = 122, S = 14;   // sitting in the second column's gap approach
+
+    // propeller blur line
+    px(bx - 8, by - 8, S + 16, 1, P.propBlur);
+    px(bx - 5, by - 9, S + 10, 1, P.prop);
+    px(bx - 10, by - 8, 2, 1, P.propBlur);
+    px(bx + S + 8, by - 8, 2, 1, P.propBlur);
+    // hub + mast
+    px(bx + 6, by - 9, 2, 2, P.prop);
+    px(bx + 6, by - 7, 2, 3, "#9aa3b8");
+
+    // body
+    px(bx, by, S, S, P.hero);
+    px(bx, by, S, 2, P.heroLight);
+    px(bx, by, 2, S, P.heroLight);
+    px(bx, by + S - 3, S, 3, P.heroDark);
+    px(bx + S - 3, by, 3, S, P.heroDark);
+    // outline
+    px(bx, by, S, 1, P.heroOutline);
+    px(bx, by + S - 1, S, 1, P.heroOutline);
+    px(bx, by, 1, S, P.heroOutline);
+    px(bx + S - 1, by, 1, S, P.heroOutline);
+
+    // warm glow under the block
+    ctx.fillStyle = "rgba(255,140,59,0.10)";
+    ctx.fillRect(bx - 4, by - 4, S + 8, S + 8);
+  })();
+
+  // ---- HUD: big pixel digits ---------------------------------------------
+  var DIGITS = {
+    "0": ["111","101","101","101","111"],
+    "1": ["010","110","010","010","111"],
+    "2": ["111","001","111","100","111"],
+    "3": ["111","001","111","001","111"],
+    "4": ["101","101","111","001","001"],
+    "5": ["111","100","111","001","111"],
+    "6": ["111","100","111","101","111"],
+    "7": ["111","001","010","010","010"],
+    "8": ["111","101","111","101","111"],
+    "9": ["111","101","111","001","111"]
+  };
+
+  function drawDigits(text, cx, top, unit) {
+    var dW = 3 * unit, gap = unit;
+    var total = text.length * dW + (text.length - 1) * gap;
+    var x0 = Math.round(cx - total / 2);
+    for (var i = 0; i < text.length; i++) {
+      var g = DIGITS[text[i]];
+      if (!g) continue;
+      var ox = x0 + i * (dW + gap);
+      for (var ry = 0; ry < 5; ry++) {
+        for (var rx = 0; rx < 3; rx++) {
+          if (g[ry][rx] !== "1") continue;
+          px(ox + rx * unit + unit, top + ry * unit + unit, unit, unit, P.hudShadow); // drop shadow
+          px(ox + rx * unit, top + ry * unit, unit, unit, P.hud);
+        }
+      }
+    }
+  }
+
+  drawDigits("12", W / 2, 14, 5);
+
+  // ---- vignette -----------------------------------------------------------
+  var vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.78);
+  vg.addColorStop(0, "rgba(0,0,0,0)");
+  vg.addColorStop(1, "rgba(0,0,0,0.42)");
+  ctx.fillStyle = vg;
+  ctx.fillRect(0, 0, W, H);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Block</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0a0a10;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  canvas {
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    display: block;
+    box-shadow: 0 0 0 2px #1d1d2a, 0 12px 40px rgba(0,0,0,0.8);
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+(function () {
+  "use strict";
+
+  // =========================================================================
+  // canvas + scaling
+  // =========================================================================
+  var W = 160, H = 288;
+
+  var canvas = document.getElementById("game");
+  canvas.width = W;
+  canvas.height = H;
+
+  var ctx = canvas.getContext("2d");
+
+  function killSmoothing(c) {
+    c.imageSmoothingEnabled = false;
+    c.mozImageSmoothingEnabled = false;
+    c.webkitImageSmoothingEnabled = false;
+    c.msImageSmoothingEnabled = false;
+  }
+  killSmoothing(ctx);
+
+  function fitScale() {
+    var sh = Math.floor((window.innerHeight - 16) / H);
+    var sw = Math.floor((window.innerWidth - 16) / W);
+    var s = Math.min(sh, sw, 4);
+    if (!isFinite(s) || s < 1) s = 1;
+    canvas.style.width = (W * s) + "px";
+    canvas.style.height = (H * s) + "px";
+  }
+  fitScale();
+  window.addEventListener("resize", fitScale);
+
+  // =========================================================================
+  // palette (from the approved mockup)
+  // =========================================================================
+  var P = {
+    skyTop:      "#05060f",
+    skyMid:      "#0b1024",
+    skyLow:      "#141b38",
+    skyHaze:     "#20264a",
+    star:        "#f2f4ff",
+    starDim:     "#9aa3c8",
+    moon:        "#f6f0d8",
+    moonShade:   "#d8d0ae",
+    moonCrater:  "#c4bb96",
+    farBldg:     "#0e1226",
+    farWin:      "#3a4270",
+    nearBldg:    "#171b30",
+    nearBldgTop: "#232842",
+    win:         "#ffd166",
+    winDim:      "#c79a3c",
+    ground:      "#101018",
+    groundTop:   "#1c1c2a",
+    groundLine:  "#2a2a3c",
+    blockFace:   "#6b4a2f",
+    blockLight:  "#8f6540",
+    blockDark:   "#3f2a19",
+    blockOutline:"#140d08",
+    blockGrey:   "#4a4a52",
+    greyLight:   "#63636d",
+    greyDark:    "#2b2b31",
+    hero:        "#ff8c3b",
+    heroLight:   "#ffb469",
+    heroDark:    "#b8541a",
+    heroOutline: "#301206",
+    prop:        "#cfd6e6",
+    propBlur:    "#7d8699",
+    hud:         "#ffffff",
+    hudShadow:   "#000000"
+  };
+
+  function pxc(c, x, y, w, h, col) {
+    c.fillStyle = col;
+    c.fillRect(x | 0, y | 0, w | 0, h | 0);
+  }
+  function px(x, y, w, h, col) { pxc(ctx, x, y, w, h, col); }
+
+  // deterministic PRNG (mulberry32) - used for the pre-rendered art layers
+  function rng(seed) {
+    return function () {
+      seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+      var t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function makeLayer(w, h) {
+    var c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    var cc = c.getContext("2d");
+    killSmoothing(cc);
+    return { canvas: c, ctx: cc, w: w, h: h };
+  }
+
+  // =========================================================================
+  // scene geometry
+  // =========================================================================
+  var GROUND_Y = 262;   // top of the pavement strip
+  var FAR_BASE = 236;   // baseline of far skyline
+  var NEAR_BASE = 262;  // baseline of near skyline
+
+  // ---- static sky: bands + stars + moon -----------------------------------
+  var SKY = makeLayer(W, H);
+  (function buildSky() {
+    var c = SKY.ctx;
+    pxc(c, 0, 0, W, H, P.skyTop);
+    pxc(c, 0, 60, W, 70, P.skyMid);
+    pxc(c, 0, 130, W, 70, P.skyLow);
+    pxc(c, 0, 200, W, 40, P.skyHaze);
+    pxc(c, 0, 56, W, 4, "#080a18");
+    pxc(c, 0, 126, W, 4, "#101636");
+    pxc(c, 0, 196, W, 4, "#1a2042");
+
+    var r = rng(1337);
+    for (var i = 0; i < 90; i++) {
+      var sx = Math.floor(r() * W);
+      var sy = Math.floor(r() * 205);
+      var bright = r();
+      if (sy > 150 && bright < 0.6) continue;
+      if (bright > 0.85) {
+        pxc(c, sx, sy, 1, 1, P.star);
+        pxc(c, sx - 1, sy, 1, 1, P.starDim);
+        pxc(c, sx + 1, sy, 1, 1, P.starDim);
+        pxc(c, sx, sy - 1, 1, 1, P.starDim);
+        pxc(c, sx, sy + 1, 1, 1, P.starDim);
+      } else if (bright > 0.5) {
+        pxc(c, sx, sy, 1, 1, P.star);
+      } else {
+        pxc(c, sx, sy, 1, 1, P.starDim);
+      }
+    }
+
+    // moon
+    var cx = 30, cy = 46, rad = 15, x, y, d;
+    for (y = -rad; y <= rad; y++) {
+      for (x = -rad; x <= rad; x++) {
+        d = x * x + y * y;
+        if (d > rad * rad) continue;
+        pxc(c, cx + x, cy + y, 1, 1, (x + y > rad * 0.75) ? P.moonShade : P.moon);
+      }
+    }
+    function crater(ox, oy, cr) {
+      for (var yy = -cr; yy <= cr; yy++)
+        for (var xx = -cr; xx <= cr; xx++)
+          if (xx * xx + yy * yy <= cr * cr) pxc(c, cx + ox + xx, cy + oy + yy, 1, 1, P.moonCrater);
+    }
+    crater(-5, -4, 3);
+    crater(4, 2, 4);
+    crater(-3, 6, 2);
+    crater(7, -6, 2);
+    c.fillStyle = "rgba(246,240,216,0.05)";
+    for (var y2 = -rad - 3; y2 <= rad + 3; y2++)
+      for (var x2 = -rad - 3; x2 <= rad + 3; x2++) {
+        var dd = x2 * x2 + y2 * y2;
+        if (dd > rad * rad && dd <= (rad + 3) * (rad + 3)) c.fillRect(cx + x2, cy + y2, 1, 1);
+      }
+  })();
+
+  // ---- far skyline tile (transparent above the roofs) ---------------------
+  var TILE_W = 320;
+  var FAR = makeLayer(TILE_W, FAR_BASE + 1);
+  (function buildFar() {
+    var c = FAR.ctx;
+    var rf = rng(77);
+    var x = 0;
+    while (x < TILE_W) {
+      var w = 10 + Math.floor(rf() * 14);
+      if (x + w > TILE_W) break;
+      var h = 16 + Math.floor(rf() * 34);
+      var top = FAR_BASE - h;
+      pxc(c, x, top, w, h, P.farBldg);
+      if (rf() > 0.75) pxc(c, x + (w >> 1), top - 5, 1, 5, P.farBldg);
+      for (var wy = top + 3; wy < FAR_BASE - 3; wy += 5) {
+        for (var wx = x + 2; wx < x + w - 2; wx += 4) {
+          if (rf() > 0.72) pxc(c, wx, wy, 1, 2, P.farWin);
+        }
+      }
+      x += w + 1 + Math.floor(rf() * 3);
+    }
+  })();
+
+  // ---- near skyline tile --------------------------------------------------
+  var NEAR = makeLayer(TILE_W, NEAR_BASE + 1);
+  (function buildNear() {
+    var c = NEAR.ctx;
+    var rn = rng(2024);
+    var x = 0;
+    while (x < TILE_W) {
+      var w = 14 + Math.floor(rn() * 18);
+      if (x + w > TILE_W) break;
+      var h = 22 + Math.floor(rn() * 30);
+      var top = NEAR_BASE - h;
+      pxc(c, x, top, w, h, P.nearBldg);
+      pxc(c, x, top, w, 1, P.nearBldgTop);
+      pxc(c, x, top, 1, h, P.nearBldgTop);
+      if (rn() > 0.7) {
+        pxc(c, x + 3, top - 4, 4, 4, P.nearBldg);
+        pxc(c, x + 3, top - 4, 4, 1, P.nearBldgTop);
+      }
+      for (var wy = top + 4; wy < NEAR_BASE - 4; wy += 6) {
+        for (var wx = x + 3; wx < x + w - 3; wx += 5) {
+          var k = rn();
+          if (k > 0.55) pxc(c, wx, wy, 2, 3, k > 0.8 ? P.win : P.winDim);
+        }
+      }
+      x += w + 2 + Math.floor(rn() * 4);
+    }
+  })();
+
+  // ---- ground tile --------------------------------------------------------
+  var GH = H - GROUND_Y;
+  var GROUND = makeLayer(TILE_W, GH);
+  (function buildGround() {
+    var c = GROUND.ctx;
+    pxc(c, 0, 0, TILE_W, GH, P.ground);
+    pxc(c, 0, 0, TILE_W, 2, P.groundTop);
+    pxc(c, 0, 3, TILE_W, 1, "#15151f");
+    for (var dx = 2; dx < TILE_W; dx += 12) pxc(c, dx, 10, 6, 1, P.groundLine);
+    var rg = rng(909);
+    for (var s = 0; s < 140; s++) {
+      pxc(c, Math.floor(rg() * TILE_W), 5 + Math.floor(rg() * (GH - 6)), 1, 1, "#1a1a26");
+    }
+  })();
+
+  // =========================================================================
+  // obstacle blocks
+  // =========================================================================
+  var CELL = 12;      // one stacked block is 12x12
+  var COL_W = 24;     // column is 2 blocks wide
+
+  // [face, light, dark] for each block tone - shared by the blocks and by
+  // the debris particles they break into
+  var TONE_COLORS = [
+    [P.blockFace, P.blockLight, P.blockDark],
+    [P.blockGrey, P.greyLight,  P.greyDark],
+    ["#232326",   "#35353a",    "#111113"]
+  ];
+
+  function drawBlock(x, y, tone) {
+    if (x + CELL < 0 || x > W || y + CELL < 0 || y > H) return;
+    var t = TONE_COLORS[tone];
+    var face = t[0], light = t[1], dark = t[2];
+
+    px(x, y, CELL, CELL, face);
+    px(x, y, CELL, 1, light);
+    px(x, y, 1, CELL, light);
+    px(x, y + CELL - 2, CELL, 2, dark);
+    px(x + CELL - 2, y, 2, CELL, dark);
+    px(x, y, CELL, 1, P.blockOutline);
+    px(x, y + CELL - 1, CELL, 1, P.blockOutline);
+    px(x, y, 1, CELL, P.blockOutline);
+    px(x + CELL - 1, y, 1, CELL, P.blockOutline);
+    px(x + 1, y + 1, CELL - 3, 1, light);
+    px(x + 1, y + 1, 1, CELL - 3, light);
+  }
+
+  function toneFor(col, row) {
+    var t = ((col * 7 + row * 5) % 6 + 6) % 6;
+    if (t < 3) return 0;
+    if (t < 5) return 1;
+    return 2;
+  }
+
+  // =========================================================================
+  // player sprite (orange cube, no eyes) - pre-baked colour grid
+  // =========================================================================
+  var S = 14;
+  var HERO_GRID = (function () {
+    var g = new Array(S * S), i, j;
+    function set(x, y, w, h, c) {
+      for (j = y; j < y + h; j++)
+        for (i = x; i < x + w; i++)
+          if (i >= 0 && i < S && j >= 0 && j < S) g[j * S + i] = c;
+    }
+    set(0, 0, S, S, P.hero);
+    set(0, 0, S, 2, P.heroLight);
+    set(0, 0, 2, S, P.heroLight);
+    set(0, S - 3, S, 3, P.heroDark);
+    set(S - 3, 0, 3, S, P.heroDark);
+    set(0, 0, S, 1, P.heroOutline);
+    set(0, S - 1, S, 1, P.heroOutline);
+    set(0, 0, 1, S, P.heroOutline);
+    set(S - 1, 0, 1, S, P.heroOutline);
+    return g;
+  })();
+
+  // draws the cube with a pixel-art vertical shear so it "tilts"
+  function drawHero(bx, by, tilt, propFrame) {
+    bx = Math.round(bx); by = Math.round(by);
+
+    // warm glow behind the block
+    ctx.fillStyle = "rgba(255,140,59,0.10)";
+    ctx.fillRect(bx - 4, by - 4, S + 8, S + 8);
+
+    // propeller (alternating blur widths)
+    var pdy = Math.round(tilt * 2);
+    if (propFrame === 0) {
+      px(bx - 8, by - 8 + pdy, S + 16, 1, P.propBlur);
+      px(bx - 5, by - 9 + pdy, S + 10, 1, P.prop);
+      px(bx - 10, by - 8 + pdy, 2, 1, P.propBlur);
+      px(bx + S + 8, by - 8 + pdy, 2, 1, P.propBlur);
+    } else {
+      px(bx - 4, by - 8 + pdy, S + 8, 1, P.propBlur);
+      px(bx - 9, by - 9 + pdy, S + 18, 1, P.prop);
+      px(bx - 12, by - 9 + pdy, 2, 1, P.propBlur);
+      px(bx + S + 10, by - 9 + pdy, 2, 1, P.propBlur);
+    }
+    // hub + mast
+    px(bx + 6, by - 9 + pdy, 2, 2, P.prop);
+    px(bx + 6, by - 7 + pdy, 2, 3, "#9aa3b8");
+
+    // body, sheared column by column
+    var half = (S - 1) / 2;
+    for (var i = 0; i < S; i++) {
+      var dy = Math.round((i - half) * tilt);
+      var runStart = 0, runCol = HERO_GRID[i];
+      for (var j = 1; j <= S; j++) {
+        var c = (j < S) ? HERO_GRID[j * S + i] : null;
+        if (c !== runCol) {
+          px(bx + i, by + runStart + dy, 1, j - runStart, runCol);
+          runStart = j; runCol = c;
+        }
+      }
+    }
+  }
+
+  // =========================================================================
+  // pixel font (3x5)
+  // =========================================================================
+  var FONT = {
+    "0": ["111","101","101","101","111"],
+    "1": ["010","110","010","010","111"],
+    "2": ["111","001","111","100","111"],
+    "3": ["111","001","111","001","111"],
+    "4": ["101","101","111","001","001"],
+    "5": ["111","100","111","001","111"],
+    "6": ["111","100","111","101","111"],
+    "7": ["111","001","010","010","010"],
+    "8": ["111","101","111","101","111"],
+    "9": ["111","101","111","001","111"],
+    "A": ["111","101","111","101","101"],
+    "B": ["110","101","110","101","110"],
+    "C": ["111","100","100","100","111"],
+    "D": ["110","101","101","101","110"],
+    "E": ["111","100","111","100","111"],
+    "F": ["111","100","111","100","100"],
+    "G": ["111","100","101","101","111"],
+    "H": ["101","101","111","101","101"],
+    "I": ["111","010","010","010","111"],
+    "J": ["001","001","001","101","111"],
+    "K": ["101","101","110","101","101"],
+    "L": ["100","100","100","100","111"],
+    "M": ["101","111","111","101","101"],
+    "N": ["101","111","111","111","101"],
+    "O": ["111","101","101","101","111"],
+    "P": ["111","101","111","100","100"],
+    "Q": ["111","101","101","111","011"],
+    "R": ["111","101","111","110","101"],
+    "S": ["111","100","111","001","111"],
+    "T": ["111","010","010","010","010"],
+    "U": ["101","101","101","101","111"],
+    "V": ["101","101","101","101","010"],
+    "W": ["101","101","111","111","101"],
+    "X": ["101","101","010","101","101"],
+    "Y": ["101","101","010","010","010"],
+    "Z": ["111","001","010","100","111"],
+    " ": ["000","000","000","000","000"],
+    "/": ["001","001","010","100","100"],
+    "!": ["010","010","010","000","010"],
+    "-": ["000","000","111","000","000"],
+    ".": ["000","000","000","000","010"]
+  };
+
+  function textWidth(text, unit) {
+    if (!text.length) return 0;
+    return text.length * 3 * unit + (text.length - 1) * unit;
+  }
+
+  function drawText(text, cx, top, unit, color, shadow) {
+    text = String(text).toUpperCase();
+    var dW = 3 * unit, gap = unit;
+    var total = textWidth(text, unit);
+    var x0 = Math.round(cx - total / 2);
+    for (var i = 0; i < text.length; i++) {
+      var g = FONT[text.charAt(i)];
+      if (!g) continue;
+      var ox = x0 + i * (dW + gap);
+      for (var ry = 0; ry < 5; ry++) {
+        for (var rx = 0; rx < 3; rx++) {
+          if (g[ry].charAt(rx) !== "1") continue;
+          if (shadow) px(ox + rx * unit + unit, top + ry * unit + unit, unit, unit, shadow);
+          px(ox + rx * unit, top + ry * unit, unit, unit, color);
+        }
+      }
+    }
+  }
+
+  // =========================================================================
+  // audio (all synthesized, Web Audio)
+  // =========================================================================
+  var audio = {
+    ctx: null,
+    master: null,
+    musicGain: null,
+    sfxGain: null,
+    muted: false,
+    playing: false,
+    step: 0,
+    nextTime: 0
+  };
+
+  try {
+    audio.muted = localStorage.getItem("block.muted") === "1";
+  } catch (e) { audio.muted = false; }
+
+  var STEP_DUR = 0.135;               // 16th-ish steps
+  // simple looping chiptune: bass line + sparse melody (MIDI notes, 0 = rest)
+  var BASS = [45, 0, 45, 0, 48, 0, 45, 0, 43, 0, 43, 0, 41, 0, 41, 0];
+  var MELODY = [69, 0, 0, 72, 0, 76, 0, 0, 0, 74, 0, 0, 72, 0, 69, 0];
+
+  function mtof(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+
+  function initAudio() {
+    if (audio.ctx) {
+      if (audio.ctx.state === "suspended") audio.ctx.resume();
+      return;
+    }
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      audio.ctx = new AC();
+    } catch (e) { audio.ctx = null; return; }
+    audio.master = audio.ctx.createGain();
+    audio.master.gain.value = audio.muted ? 0 : 1;
+    audio.master.connect(audio.ctx.destination);
+
+    audio.musicGain = audio.ctx.createGain();
+    audio.musicGain.gain.value = 0.34;
+    audio.musicGain.connect(audio.master);
+
+    audio.sfxGain = audio.ctx.createGain();
+    audio.sfxGain.gain.value = 0.6;
+    audio.sfxGain.connect(audio.master);
+
+    if (audio.ctx.state === "suspended") audio.ctx.resume();
+  }
+
+  function applyMute() {
+    if (audio.master) audio.master.gain.value = audio.muted ? 0 : 1;
+    try { localStorage.setItem("block.muted", audio.muted ? "1" : "0"); } catch (e) {}
+  }
+
+  function tone(freq, start, dur, type, peak, dest) {
+    if (!audio.ctx) return;
+    var o = audio.ctx.createOscillator();
+    var g = audio.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, start);
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(peak, start + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    o.connect(g);
+    g.connect(dest || audio.sfxGain);
+    o.start(start);
+    o.stop(start + dur + 0.03);
+  }
+
+  function startMusic() {
+    if (!audio.ctx) return;
+    audio.playing = true;
+    audio.step = 0;
+    audio.nextTime = audio.ctx.currentTime + 0.06;
+  }
+  function stopMusic() { audio.playing = false; }
+
+  function pumpMusic() {
+    if (!audio.ctx || !audio.playing) return;
+    var now = audio.ctx.currentTime;
+    // the loop is paused while the tab is hidden - resync instead of dumping
+    // every missed step at once
+    if (audio.nextTime < now) audio.nextTime = now + 0.02;
+    var guard = 0;
+    while (audio.nextTime < now + 0.25 && guard++ < 64) {
+      var i = audio.step % 16;
+      var b = BASS[i];
+      if (b) tone(mtof(b), audio.nextTime, 0.13, "square", 0.10, audio.musicGain);
+      var m = MELODY[i];
+      if (m) tone(mtof(m), audio.nextTime, 0.19, "triangle", 0.09, audio.musicGain);
+      // soft hat every 4th step
+      if (i % 4 === 2) tone(6000, audio.nextTime, 0.03, "square", 0.012, audio.musicGain);
+      audio.nextTime += STEP_DUR;
+      audio.step++;
+    }
+  }
+
+  // explosion: bright noise burst with a fast filter drop, a low sine thump
+  // and a descending buzz tail. Routed through sfxGain, so mute applies.
+  function sfxExplosion() {
+    if (!audio.ctx) return;
+    var t0 = audio.ctx.currentTime;
+
+    // noise burst - the body of the blast
+    var len = Math.floor(audio.ctx.sampleRate * 0.55);
+    var buf = audio.ctx.createBuffer(1, len, audio.ctx.sampleRate);
+    var d = buf.getChannelData(0);
+    for (var i = 0; i < len; i++) {
+      var k = 1 - i / len;
+      d[i] = (Math.random() * 2 - 1) * k * k;
+    }
+    var src = audio.ctx.createBufferSource();
+    src.buffer = buf;
+    var f = audio.ctx.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.setValueAtTime(6000, t0);
+    f.frequency.exponentialRampToValueAtTime(1200, t0 + 0.09);
+    f.frequency.exponentialRampToValueAtTime(140, t0 + 0.5);
+    var g = audio.ctx.createGain();
+    g.gain.setValueAtTime(0.62, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+    src.connect(f); f.connect(g); g.connect(audio.sfxGain);
+    src.start(t0);
+
+    // low sine thump
+    var th = audio.ctx.createOscillator();
+    var tg = audio.ctx.createGain();
+    th.type = "sine";
+    th.frequency.setValueAtTime(140, t0);
+    th.frequency.exponentialRampToValueAtTime(34, t0 + 0.4);
+    tg.gain.setValueAtTime(0.5, t0);
+    tg.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.45);
+    th.connect(tg); tg.connect(audio.sfxGain);
+    th.start(t0); th.stop(t0 + 0.5);
+
+    // descending buzz tail
+    var o = audio.ctx.createOscillator();
+    var og = audio.ctx.createGain();
+    o.type = "square";
+    o.frequency.setValueAtTime(300, t0 + 0.03);
+    o.frequency.exponentialRampToValueAtTime(48, t0 + 0.38);
+    og.gain.setValueAtTime(0.12, t0 + 0.03);
+    og.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.4);
+    o.connect(og); og.connect(audio.sfxGain);
+    o.start(t0 + 0.03); o.stop(t0 + 0.44);
+  }
+
+  function sfxMilestone() {
+    if (!audio.ctx) return;
+    var t0 = audio.ctx.currentTime;
+    var notes = [72, 76, 79, 84];
+    for (var i = 0; i < notes.length; i++) {
+      tone(mtof(notes[i]), t0 + i * 0.07, 0.16, "square", 0.16);
+    }
+  }
+
+  // =========================================================================
+  // game state
+  // =========================================================================
+  var TITLE = 0, PLAYING = 1, DEAD = 2;
+
+  var GRAVITY   = 520;    // px/s^2
+  var FLAP      = -155;   // px/s impulse
+  var MAX_FALL  = 260;    // px/s terminal velocity
+  var SPEED_BASE = 40;    // px/s
+  var SPEED_STEP = 3;     // px/s added every 5 points
+  var SPEED_MAX  = 70;    // px/s cap
+  var GAP_H      = 72;    // px vertical gap
+  var SPACING    = 70;    // px between column left edges
+  var GAP_MIN    = 40;
+  var GAP_MAX    = GROUND_Y - GAP_H - 30;
+  var PLAYER_X   = 50;
+  var HIT_INSET  = 2;     // forgiving hitbox
+  var DEAD_LOCK  = 0.3;   // s before restart is accepted
+
+  var state = TITLE;
+  var score = 0;
+  var best = 0;
+  var newBest = false;
+  try { best = parseInt(localStorage.getItem("block.highScore"), 10) || 0; } catch (e) { best = 0; }
+
+  var player = { y: 0, vy: 0, tilt: 0 };
+  var columns = [];
+  var speed = SPEED_BASE;
+  var offFar = 0, offNear = 0, offGround = 0;
+  var clock = 0;         // total elapsed seconds
+  var deadTime = 0;
+  var flash = 0;
+  var heroAlive = true;
+
+  // clears the columns (and with them any exploded-block bookkeeping) plus
+  // all debris, so a replay always starts clean
+  function resetScene() {
+    columns.length = 0;
+    particles.length = 0;
+    offFar = 0; offNear = 0; offGround = 0;
+    speed = SPEED_BASE;
+    heroAlive = true;
+  }
+
+  function startGame() {
+    state = PLAYING;
+    score = 0;
+    newBest = false;
+    deadTime = 0;
+    flash = 0;
+    resetScene();
+    player.y = H * 0.38;
+    player.vy = FLAP * 0.6;
+    player.tilt = 0;
+    spawnColumn(W + 20);
+    startMusic();
+  }
+
+  function toTitle() {
+    state = TITLE;
+    resetScene();
+    player.y = 148;
+    player.vy = 0;
+    player.tilt = 0;
+    stopMusic();
+  }
+
+  function spawnColumn(x) {
+    var gapTop = Math.round(GAP_MIN + Math.random() * (GAP_MAX - GAP_MIN));
+    columns.push({
+      x: x,
+      gapTop: gapTop,
+      seed: Math.floor(Math.random() * 6),
+      scored: false
+    });
+  }
+
+  function currentSpeed() {
+    return Math.min(SPEED_MAX, SPEED_BASE + Math.floor(score / 5) * SPEED_STEP);
+  }
+
+  function flap() {
+    player.vy = FLAP;
+  }
+
+  // =========================================================================
+  // pixel debris particles
+  // =========================================================================
+  var particles = [];
+  var PART_GRAVITY = 300;   // px/s^2
+  var PART_LIFE    = 1.0;   // s
+  var BLAST_R      = 14;    // px - blocks within this of the impact break up
+  var MAX_PARTS    = 420;
+
+  // tone >= 0 marks a shaded brick chunk; otherwise it is a flat pixel
+  function addPart(x, y, vx, vy, size, col, life, tone) {
+    if (particles.length >= MAX_PARTS) return;
+    particles.push({
+      x: x, y: y, vx: vx, vy: vy,
+      size: size, col: col,
+      tone: (tone === undefined) ? -1 : tone,
+      life: life, seed: (particles.length * 7) & 1
+    });
+  }
+
+  // scatter a piece outward from the blast origin
+  function scatter(x, y, ox, oy, size, col, power, tone) {
+    var dx = x - ox, dy = y - oy;
+    var d = Math.sqrt(dx * dx + dy * dy);
+    if (d < 0.001) { dx = Math.random() - 0.5; dy = Math.random() - 0.5; d = 1; }
+    var sp = power * (0.55 + Math.random() * 0.75);
+    addPart(
+      x, y,
+      (dx / d) * sp + (Math.random() - 0.5) * 26,
+      (dy / d) * sp + (Math.random() - 0.5) * 26 - 24,
+      size, col,
+      PART_LIFE * (0.6 + Math.random() * 0.55),
+      tone
+    );
+  }
+
+  // the cube itself: one particle per sprite pixel, plus the propeller
+  function explodeHero(bx, by) {
+    var ox = bx + S / 2, oy = by + S / 2, i, j;
+    for (j = 0; j < S; j++) {
+      for (i = 0; i < S; i++) {
+        var col = HERO_GRID[j * S + i];
+        if (!col) continue;
+        scatter(bx + i, by + j, ox, oy, 1, col, 105);
+      }
+    }
+    // propeller blade + mast pixels
+    for (i = -8; i <= S + 8; i += 2) {
+      scatter(bx + i, by - 8 - (i & 1), ox, oy, 1,
+              (i % 4 === 0) ? P.prop : P.propBlur, 130);
+    }
+    addPart(bx + 6, by - 8, (Math.random() - 0.5) * 60, -120, 2, P.prop, PART_LIFE);
+  }
+
+  // a 12x12 block breaks into a 3x3 grid of 4x4 brick chunks - real brick
+  // pieces with their own shading, not a cloud of dust
+  var PIECE = 4;
+  function explodeBlock(x, y, tone, ox, oy) {
+    for (var gy = 0; gy < CELL / PIECE; gy++) {
+      for (var gx = 0; gx < CELL / PIECE; gx++) {
+        scatter(x + gx * PIECE, y + gy * PIECE, ox, oy, PIECE, null, 72, tone);
+      }
+    }
+  }
+
+  // one brick chunk, shaded like the block it came from
+  function drawBrickPiece(x, y, n, tone) {
+    var t = TONE_COLORS[tone];
+    px(x, y, n, n, t[0]);
+    px(x, y, n, 1, t[1]);           // top highlight
+    px(x, y, 1, n, t[1]);           // left highlight
+    px(x + n - 1, y, 1, n, t[2]);   // right shade
+    px(x, y + n - 1, n, 1, t[2]);   // bottom shade
+  }
+
+  // break the blocks of the hit column that sit near the impact point
+  function explodeNearbyBlocks(c, ox, oy) {
+    if (!c) return;
+    if (!c.gone) c.gone = {};
+    var cx = Math.round(c.x), b, y, row;
+
+    y = c.gapTop - CELL; row = 0;
+    while (y > -CELL) {
+      if (Math.abs(y + CELL / 2 - oy) <= BLAST_R) {
+        for (b = 0; b < COL_W / CELL; b++) {
+          c.gone["t" + row + "_" + b] = 1;
+          explodeBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b, row), ox, oy);
+        }
+      }
+      y -= CELL; row++;
+    }
+
+    y = c.gapTop + GAP_H; row = 0;
+    while (y < GROUND_Y) {
+      if (Math.abs(y + CELL / 2 - oy) <= BLAST_R) {
+        for (b = 0; b < COL_W / CELL; b++) {
+          c.gone["b" + row + "_" + b] = 1;
+          explodeBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b + 1, row + 4), ox, oy);
+        }
+      }
+      y += CELL; row++;
+    }
+  }
+
+  function updateParticles(dt) {
+    if (!particles.length) return;
+    var damp = Math.exp(-1.1 * dt);
+    for (var i = particles.length - 1; i >= 0; i--) {
+      var p = particles[i];
+      p.vy += PART_GRAVITY * dt;
+      p.vx *= damp;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      // debris settles on the pavement
+      if (p.y > GROUND_Y - p.size && p.vy > 0) {
+        p.y = GROUND_Y - p.size;
+        p.vy *= -0.34;
+        p.vx *= 0.6;
+        if (Math.abs(p.vy) < 12) p.vy = 0;
+      }
+      p.life -= dt;
+      if (p.life <= 0 || p.x < -8 || p.x > W + 8 || p.y > H + 8) particles.splice(i, 1);
+    }
+  }
+
+  function drawParticles() {
+    for (var i = 0; i < particles.length; i++) {
+      var p = particles[i];
+      // fade out by flickering, which keeps the pixel-art look
+      if (p.life < 0.3 && ((Math.floor(clock * 22) + p.seed) & 1)) continue;
+      if (p.tone >= 0) drawBrickPiece(p.x | 0, p.y | 0, p.size, p.tone);
+      else px(p.x, p.y, p.size, p.size, p.col);
+    }
+  }
+
+  function die(hit) {
+    state = DEAD;
+    deadTime = 0;
+    flash = 0.16;
+    heroAlive = false;
+    stopMusic();
+    sfxExplosion();
+
+    var ox = PLAYER_X + S / 2, oy = player.y + S / 2;
+    explodeHero(PLAYER_X, player.y);
+    explodeNearbyBlocks(hit && hit.col, ox, oy);
+
+    if (score > best) {
+      best = score;
+      newBest = true;
+      try { localStorage.setItem("block.highScore", String(best)); } catch (e) {}
+    }
+  }
+
+  function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
+
+  // returns null, or { col: <column hit, or null for the ground> }
+  function checkCollision() {
+    var hx = PLAYER_X + HIT_INSET;
+    var hy = player.y + HIT_INSET;
+    var hw = S - HIT_INSET * 2;
+    var hh = S - HIT_INSET * 2;
+
+    if (hy + hh >= GROUND_Y) return { col: null };
+
+    for (var i = 0; i < columns.length; i++) {
+      var c = columns[i];
+      if (c.x > hx + hw || c.x + COL_W < hx) continue;
+      if (rectsOverlap(hx, hy, hw, hh, c.x, -H, COL_W, H + c.gapTop)) return { col: c };
+      var bottomY = c.gapTop + GAP_H;
+      if (rectsOverlap(hx, hy, hw, hh, c.x, bottomY, COL_W, GROUND_Y - bottomY)) return { col: c };
+    }
+    return null;
+  }
+
+  // =========================================================================
+  // update (fixed timestep)
+  // =========================================================================
+  var DT = 1 / 120;
+
+  function step(dt) {
+    clock += dt;
+    updateParticles(dt);   // inside the fixed timestep, so 60Hz == 120Hz
+
+    if (state === TITLE) {
+      speed = SPEED_BASE;
+      scrollWorld(dt, speed);
+      player.y = 148 + Math.sin(clock * 2.4) * 3;
+      player.tilt = Math.sin(clock * 2.4 + 1.6) * 0.05;
+      return;
+    }
+
+    if (state === PLAYING) {
+      speed = currentSpeed();
+      scrollWorld(dt, speed);
+
+      player.vy += GRAVITY * dt;
+      if (player.vy > MAX_FALL) player.vy = MAX_FALL;
+      player.y += player.vy * dt;
+
+      // ceiling clamp - no death at the top
+      if (player.y < 0) { player.y = 0; if (player.vy < 0) player.vy = 0; }
+
+      var target = Math.max(-1, Math.min(1, player.vy / MAX_FALL)) * 0.24;
+      player.tilt += (target - player.tilt) * Math.min(1, dt * 12);
+
+      // move / spawn / score columns
+      var i, c;
+      for (i = 0; i < columns.length; i++) {
+        c = columns[i];
+        c.x -= speed * dt;
+        if (!c.scored && c.x + COL_W < PLAYER_X) {
+          c.scored = true;
+          score++;
+          if (score % 10 === 0) sfxMilestone();
+        }
+      }
+      while (columns.length && columns[0].x + COL_W < -4) columns.shift();
+
+      var lastCol = columns[columns.length - 1];
+      if (!lastCol || lastCol.x <= W - SPACING) {
+        spawnColumn(lastCol ? lastCol.x + SPACING : W + 20);
+      }
+
+      var hit = checkCollision();
+      if (hit) die(hit);
+      return;
+    }
+
+    // DEAD - the cube is gone, the debris carries the animation
+    deadTime += dt;
+    if (flash > 0) flash -= dt;
+  }
+
+  function scrollWorld(dt, sp) {
+    offFar = (offFar + sp * 0.25 * dt) % TILE_W;
+    offNear = (offNear + sp * 0.55 * dt) % TILE_W;
+    offGround = (offGround + sp * dt) % TILE_W;
+  }
+
+  // =========================================================================
+  // render
+  // =========================================================================
+  function drawTiled(layer, off, y) {
+    var x = -Math.floor(off);
+    while (x < W) {
+      ctx.drawImage(layer.canvas, x, y);
+      x += layer.w;
+    }
+  }
+
+  function drawColumn(c) {
+    var cx = Math.round(c.x);
+    if (cx > W || cx + COL_W < 0) return;
+
+    var gone = c.gone;
+    var y = c.gapTop - CELL, row = 0, b;
+    while (y > -CELL) {
+      for (b = 0; b < COL_W / CELL; b++) {
+        if (gone && gone["t" + row + "_" + b]) continue;
+        drawBlock(cx + b * CELL, y, toneFor(c.seed * 3 + b, row));
+      }
+      y -= CELL;
+      row++;
+    }
+    var by = c.gapTop + GAP_H;
+    row = 0;
+    while (by < GROUND_Y) {
+      for (b = 0; b < COL_W / CELL; b++) {
+        if (gone && gone["b" + row + "_" + b]) continue;
+        drawBlock(cx + b * CELL, by, toneFor(c.seed * 3 + b + 1, row + 4));
+      }
+      by += CELL;
+      row++;
+    }
+    ctx.fillStyle = "rgba(0,0,0,0.28)";
+    ctx.fillRect(cx + COL_W, 0, 2, c.gapTop);
+    ctx.fillRect(cx + COL_W, c.gapTop + GAP_H, 2, GROUND_Y - (c.gapTop + GAP_H));
+  }
+
+  function drawSpeaker() {
+    var x = W - 12, y = H - 12;
+    px(x, y + 2, 2, 3, "#8f95ad");
+    px(x + 2, y, 2, 7, "#8f95ad");
+    if (audio.muted) {
+      px(x + 5, y + 1, 1, 1, "#c86060");
+      px(x + 6, y + 2, 1, 1, "#c86060");
+      px(x + 7, y + 3, 1, 1, "#c86060");
+      px(x + 7, y + 1, 1, 1, "#c86060");
+      px(x + 6, y + 2, 1, 1, "#c86060");
+      px(x + 5, y + 3, 1, 1, "#c86060");
+      px(x + 5, y + 4, 1, 1, "#c86060");
+      px(x + 6, y + 5, 1, 1, "#c86060");
+      px(x + 7, y + 5, 1, 1, "#c86060");
+    } else {
+      px(x + 5, y + 1, 1, 5, "#8f95ad");
+      px(x + 7, y, 1, 7, "#5f6479");
+    }
+  }
+
+  function render() {
+    // background
+    ctx.drawImage(SKY.canvas, 0, 0);
+    drawTiled(FAR, offFar, 0);
+    drawTiled(NEAR, offNear, 0);
+
+    // obstacles
+    for (var i = 0; i < columns.length; i++) drawColumn(columns[i]);
+
+    // ground on top of column feet
+    drawTiled(GROUND, offGround, GROUND_Y);
+
+    // player
+    if (heroAlive) {
+      var propFrame = (Math.floor(clock / 0.055) % 2);
+      drawHero(PLAYER_X, player.y, player.tilt, propFrame);
+    }
+
+    // debris on top of the scene
+    drawParticles();
+
+    // vignette
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, W, H);
+
+    // HUD / screens
+    var blink = (Math.floor(clock * 1.6) % 2) === 0;
+
+    if (state === TITLE) {
+      drawText("BLOCK", W / 2, 52, 5, P.hud, P.hudShadow);
+      drawText("BEST " + best, W / 2, 88, 1, "#9aa3c8", P.hudShadow);
+      if (blink) drawText("TAP / CLICK / SPACE", W / 2, 104, 1, P.hud, P.hudShadow);
+      if (blink) drawText("TO START", W / 2, 114, 1, P.hud, P.hudShadow);
+    } else if (state === PLAYING) {
+      drawText(String(score), W / 2, 14, 5, P.hud, P.hudShadow);
+    } else {
+      drawText(String(score), W / 2, 14, 5, P.hud, P.hudShadow);
+      if (deadTime >= DEAD_LOCK) {
+        ctx.fillStyle = "rgba(5,6,15,0.78)";
+        ctx.fillRect(14, 68, W - 28, 132);
+        px(14, 68, W - 28, 1, "#2a2f4c");
+        px(14, 199, W - 28, 1, "#2a2f4c");
+        px(14, 68, 1, 132, "#2a2f4c");
+        px(W - 15, 68, 1, 132, "#2a2f4c");
+
+        drawText("GAME OVER", W / 2, 78, 3, "#ff8c3b", P.hudShadow);
+        drawText("SCORE", W / 2, 102, 1, "#9aa3c8", null);
+        drawText(String(score), W / 2, 111, 3, P.hud, P.hudShadow);
+        drawText("BEST", W / 2, 134, 1, "#9aa3c8", null);
+        drawText(String(best), W / 2, 143, 3, P.hud, P.hudShadow);
+        if (newBest && blink) drawText("NEW BEST!", W / 2, 166, 1, "#ffd166", P.hudShadow);
+        if (blink) drawText("TAP TO PLAY AGAIN", W / 2, 182, 1, P.hud, P.hudShadow);
+      }
+    }
+
+    drawSpeaker();
+
+    if (flash > 0) {
+      ctx.fillStyle = "rgba(255,255,255," + Math.max(0, Math.min(0.75, flash * 4)).toFixed(3) + ")";
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+
+  var vignette = (function () {
+    var vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.78);
+    vg.addColorStop(0, "rgba(0,0,0,0)");
+    vg.addColorStop(1, "rgba(0,0,0,0.42)");
+    return vg;
+  })();
+
+  // =========================================================================
+  // input
+  // =========================================================================
+  function onPress() {
+    initAudio();
+    if (state === TITLE) {
+      startGame();
+      flap();
+    } else if (state === PLAYING) {
+      flap();
+    } else if (state === DEAD && deadTime >= DEAD_LOCK) {
+      startGame();
+      flap();
+    }
+  }
+
+  document.addEventListener("mousedown", function (e) { e.preventDefault(); onPress(); });
+  window.addEventListener("touchstart", function (e) {
+    e.preventDefault();
+    onPress();
+  }, { passive: false });
+
+  window.addEventListener("keydown", function (e) {
+    if (e.code === "Space" || e.key === " " || e.keyCode === 32) {
+      e.preventDefault();
+      if (e.repeat) return;
+      onPress();
+      return;
+    }
+    if (e.key === "m" || e.key === "M") {
+      audio.muted = !audio.muted;
+      initAudio();
+      applyMute();
+    }
+  });
+
+  // avoid a stuck loop / silent audio after a tab switch
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden && audio.ctx && audio.ctx.state === "suspended") audio.ctx.resume();
+    last = 0;
+  });
+
+  // =========================================================================
+  // main loop (fixed timestep, frame-rate independent)
+  // =========================================================================
+  var last = 0, acc = 0;
+
+  function frame(ts) {
+    if (!last) last = ts;
+    var dt = (ts - last) / 1000;
+    last = ts;
+    if (dt > 0.25) dt = 0.25;    // clamp after a stall
+    acc += dt;
+    var guard = 0;
+    while (acc >= DT && guard++ < 240) {
+      step(DT);
+      acc -= DT;
+    }
+    pumpMusic();
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  toTitle();
+  clock = 0;
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
