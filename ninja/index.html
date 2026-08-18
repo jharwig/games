@@ -307,7 +307,7 @@ var TRICK_SPIN   = 16;      // rad / s, the fastest an air trick is allowed to t
 var TRICK_MIN    = 0.34;    // s of airtime below which a trick is a pose only
 var CLIMB_SPEED  = 3.6;
 var RAIL_SPEED   = 4.4;
-var RELEASE_LOCK = 0.42;    // s before the player can grab again
+var RELEASE_LOCK = 0.30;    // s before the player can grab again
 var PEND_DAMP    = 0.12;
 var PUMP         = 2.2;
 
@@ -893,7 +893,7 @@ var player = {
   z: 0, y: 0, vz: 0, vy: 0,
   onGround: false, coyote: 0, jumpBuf: 0,
   jumpCut: false, jumpHold: 0,   // variable jump height: armed while the rise can still be cut
-  flip: 0, runPhase: 0, stepT: 0,
+  flip: 0, runPhase: 0, stepT: 0, moveAnim: 0,
   twist: 0,            // yaw held by a spin trick
   trick: null,         // active air trick, see startTrick()
   armSpread: 0, legSpread: 0,   // sideways limb spread for star / straddle poses
@@ -1110,8 +1110,8 @@ function buildSwing(c, z, y, d) {
 }
 
 function buildLache(c, z, y, d) {
-  var n = 2 + (d > 0.35 ? 1 : 0) + (d > 0.75 ? 1 : 0);
-  var spacing = 3.8 + d * 1.0;
+  var n = 2 + (d > 0.5 ? 1 : 0) + (d > 0.85 ? 1 : 0);
+  var spacing = 3.3 + d * 0.7;
   var barY = y + 3.2;
   var hex = pickColor();
   for (var i = 0; i < n; i++) {
@@ -1603,6 +1603,11 @@ function release(boost) {
     var vy = g.len * player.omega * Math.sin(player.theta);
     player.vz = vz * 1.3 + (vz > 0 ? 1.0 : 0);
     player.vy = vy * 1.3 + 2.0;
+    if (g.ropeLen < 0.4) {
+      // a weak lache still gets a usable hop to the next bar
+      player.vz = Math.max(player.vz, 4.6);
+      player.vy = Math.max(player.vy, 3.4);
+    }
   } else if (g.kind === "rail") {
     player.vz = 5.8;
     player.vy = 4.6;
@@ -1800,7 +1805,9 @@ function updateHanging(dt, jumpPressed) {
     var alpha = -(GRAVITY / g.len) * Math.sin(player.theta) - PEND_DAMP * player.omega;
     player.omega += alpha * dt;
     if (input.forward && Math.abs(player.theta) < 1.15) {
-      player.omega += PUMP * Math.sign(player.omega || 1) * dt;
+      // bare bars (the lache) get a stronger kip than the long ropes
+      var pump = PUMP * (g.ropeLen < 0.4 ? 1.7 : 1);
+      player.omega += pump * Math.sign(player.omega || 1) * dt;
     }
     player.omega = clamp(player.omega, -5, 5);
     player.theta += player.omega * dt;
@@ -1858,7 +1865,7 @@ function updateFree(dt, jumpPressed) {
     puff(0, player.y + 0.05, player.z, 5, 0.3, 1.4);
   } else if (jumpPressed || player.jumpBuf > 0) {
     // in the air: space reaches out for a rope or bar
-    if (tryGrab(2.1 - 0.5 * (current ? current.d : 0))) {
+    if (tryGrab(2.3 - 0.35 * (current ? current.d : 0))) {
       player.jumpBuf = 0;
       return;
     }
@@ -1895,7 +1902,7 @@ function updateFree(dt, jumpPressed) {
 
   // forgiving auto-grab so bars catch you even without a perfect press
   if (!player.onGround && player.air > 0.14) {
-    tryGrab(1.2 - 0.35 * (current ? current.d : 0));
+    tryGrab(1.45 - 0.3 * (current ? current.d : 0));
     if (player.hang) return;
   }
 
@@ -2092,8 +2099,10 @@ function poseHang(dt, tilt) {
   settleTrick(dt);
   setArms(Math.PI * 0.97, Math.PI * 0.97);
   var k = Math.sin(performance.now() * 0.004) * 0.15;
-  setLegs(0.35 + k - tilt, 0.1 - k - tilt);
-  head.rotation.x = -0.2;
+  // kip: the legs drive the swing, tucking hard when the player pumps
+  var kip = input.forward ? clamp(player.omega * 0.28, -0.7, 0.7) : 0;
+  setLegs(0.35 + k - tilt - kip, 0.1 - k - tilt - kip);
+  head.rotation.x = -0.2 - kip * 0.3;
   ninjaBody.position.y = -1.0;
   ninjaBody.scale.set(1, 1, 1);
 }
@@ -2102,12 +2111,16 @@ function poseRail(dt) {
   player.flip = damp(player.flip, 0, 16, dt);
   ninjaFlip.rotation.x = player.flip;
   settleTrick(dt);
-  player.runPhase += dt * 7;
-  var sw = Math.sin(player.runPhase) * 0.22;
-  setArms(Math.PI * 0.97 + sw, Math.PI * 0.97 - sw);
-  setLegs(0.4 + sw * 0.7, 0.15 - sw * 0.7);
+  // hand over hand along the bar; a slow settle when hanging still
+  player.moveAnim = damp(player.moveAnim, input.forward ? 1 : 0, 10, dt);
+  var m = player.moveAnim;
+  player.runPhase += dt * (2 + m * 8);
+  var sw = Math.sin(player.runPhase);
+  setArms(Math.PI * 0.97 + sw * (0.12 + 0.55 * m), Math.PI * 0.97 - sw * (0.12 + 0.55 * m));
+  setLegs(0.4 + sw * (0.2 + 0.55 * m), 0.15 - sw * (0.2 + 0.55 * m));
   head.rotation.x = -0.25;
-  ninjaBody.position.y = -1.0;
+  // each new grip hitches the body up a little
+  ninjaBody.position.y = -1.0 + Math.abs(Math.cos(player.runPhase)) * 0.08 * m;
   ninjaBody.scale.set(1, 1, 1);
 }
 
@@ -2115,12 +2128,15 @@ function poseClimb(dt) {
   player.flip = damp(player.flip, 0, 16, dt);
   ninjaFlip.rotation.x = player.flip;
   settleTrick(dt);
-  player.runPhase += dt * 8;
-  var sw = Math.sin(player.runPhase) * 0.3;
-  setArms(Math.PI * 0.94 + sw, Math.PI * 0.94 - sw);
-  setLegs(0.55 - sw, 0.55 + sw);
-  head.rotation.x = -0.15;
-  ninjaBody.position.y = -1.0;
+  // hand over hand up the rope, knees pumping, with a pull-up bob
+  player.moveAnim = damp(player.moveAnim, input.forward ? 1 : 0, 10, dt);
+  var m = player.moveAnim;
+  player.runPhase += dt * (2 + m * 9);
+  var sw = Math.sin(player.runPhase);
+  setArms(Math.PI * 0.94 + sw * (0.15 + 0.6 * m), Math.PI * 0.94 - sw * (0.15 + 0.6 * m));
+  setLegs(0.45 - sw * (0.15 + 0.55 * m), 0.45 + sw * (0.15 + 0.55 * m));
+  head.rotation.x = -0.15 - m * 0.3;   // look up the rope while climbing
+  ninjaBody.position.y = -1.0 + Math.abs(sw) * 0.1 * m;
   ninjaBody.scale.set(1, 1, 1);
 }
 
