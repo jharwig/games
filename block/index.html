@@ -34,6 +34,8 @@
 </head>
 <body>
 <canvas id="game"></canvas>
+<!-- iOS haptic hack: a programmatic toggle of a switch-style checkbox makes a haptic tap on iOS 17.4+ -->
+<label id="haptic" style="position:fixed;left:-9999px;top:0" aria-hidden="true"><input type="checkbox" switch tabindex="-1"></label>
 <script>
 (function () {
   "use strict";
@@ -906,6 +908,13 @@
     abT = AB_DUR;
     stopMusic();
     sfxExplosion();
+    if (navigator.vibrate) {
+      navigator.vibrate([90, 40, 60]);
+    } else {
+      // iOS Safari has no vibrate API; toggling a switch checkbox gives a haptic tap on iOS 17.4+
+      var haptic = document.getElementById("haptic");
+      if (haptic) haptic.click();
+    }
 
     var ox = PLAYER_X + S / 2, oy = player.y + S / 2;
     explodeHero(PLAYER_X, player.y);
