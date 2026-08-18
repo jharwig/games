@@ -307,6 +307,8 @@ var TRICK_SPIN   = 16;      // rad / s, the fastest an air trick is allowed to t
 var TRICK_MIN    = 0.34;    // s of airtime below which a trick is a pose only
 var CLIMB_SPEED  = 3.6;
 var RAIL_SPEED   = 4.4;
+var ZIP_ACCEL    = 7.5;     // units / s^2 gained rolling down the wire
+var ZIP_MAX      = 11;      // the trolley never goes faster than this
 var RELEASE_LOCK = 0.30;    // s before the player can grab again
 var PEND_DAMP    = 0.12;
 var PUMP         = 2.2;
@@ -464,6 +466,7 @@ function sfxLand()  { if (audio.ctx) tone(150, audio.ctx.currentTime, 0.09, "sin
 function sfxGrab()  { if (audio.ctx) { var t = audio.ctx.currentTime; tone(240, t, 0.07, "square", 0.18); tone(360, t + 0.03, 0.07, "square", 0.12); } }
 function sfxWhoosh(){ if (audio.ctx) noise(audio.ctx.currentTime, 0.3, 500, 2600, 0.2); }
 function sfxStep()  { if (audio.ctx) noise(audio.ctx.currentTime, 0.05, 900, 400, 0.05); }
+function sfxBounce(){ if (audio.ctx) { var t = audio.ctx.currentTime; tone(150, t, 0.18, "sine", 0.22, null, 540); tone(300, t + 0.03, 0.13, "triangle", 0.1, null, 980); } }
 
 function sfxFall() {
   if (!audio.ctx) return;
@@ -1167,6 +1170,82 @@ function buildClimb(c, z, y, d) {
   return { z: lz + len, y: y + rise };
 }
 
+function buildBounce(c, z, y, d) {
+  var gap = 1.8 + d * 0.8;
+  var rise = 3.2 + d * 2.2;
+  var padZ = z + gap + 1.45;
+  var hex = pickColor();
+  var frame = shade(hex, 0.5);
+  // trampoline drum: a dark springy skin inside a bright rim on a squat base
+  var skin = tube(c.group, 0, y - 0.14, padZ, 1.5, 0.28, 0x1c2740);
+  tube(c.group, 0, y - 0.3, padZ, 1.66, 0.34, hex);
+  tube(c.group, 0, y - 0.95, padZ, 1.15, 1.0, frame);
+  // enough launch to clear the high ledge with a little to spare
+  var v = Math.sqrt(2 * GRAVITY * (rise + 2.2));
+  c.platforms.push({ z0: padZ - 1.45, z1: padZ + 1.45, y: y, bounce: v, pad: skin, squash: 0 });
+
+  var lz = padZ + 2.6 + d * 0.6;
+  // stays long at high difficulty, or the launch can overshoot the far edge
+  var len = 7 - d * 1.2 + rand(0, 2);
+  addPlatform(c, lz, lz + len, y + rise, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 2.6 + len / RUN_SPEED;
+  return { z: lz + len, y: y + rise };
+}
+
+function buildZip(c, z, y, d) {
+  var hex = pickColor();
+  var frame = shade(hex, 0.5);
+  var towerZ = z + 1.6;
+  var topY = y + 4.4;
+  var span = 9 + d * 5 + rand(0, 2);
+  var drop = 2.4 + d * 1.2;
+  var endZ = towerZ + span;
+  var endY = topY - drop;
+  var landY = endY - 2.9;
+
+  // start tower on the platform behind you, end tower on the landing pad
+  tube(c.group, -1.3, (y + topY + 0.6) / 2, towerZ, 0.14, topY + 0.6 - y, frame);
+  tube(c.group,  1.3, (y + topY + 0.6) / 2, towerZ, 0.14, topY + 0.6 - y, frame);
+  tube(c.group, 0, topY + 0.3, towerZ, 0.13, 2.9, hex, "x");
+  tube(c.group, -1.3, (landY + endY + 0.6) / 2, endZ, 0.14, endY + 0.6 - landY, frame);
+  tube(c.group,  1.3, (landY + endY + 0.6) / 2, endZ, 0.14, endY + 0.6 - landY, frame);
+  tube(c.group, 0, endY + 0.3, endZ, 0.13, 2.9, hex, "x");
+
+  // the wire, tilted to run bar to bar
+  var wireLen = Math.hypot(span, drop);
+  var wire = tube(c.group, 0, (topY + endY) / 2 + 0.3, (towerZ + endZ) / 2, 0.05, wireLen, 0xf0e2c0);
+  wire.rotation.x = Math.atan2(-span, drop);
+
+  // the trolley: wheel block, rope, fat handle
+  var trolley = new THREE.Group();
+  c.group.add(trolley);
+  box(trolley, 0, 0.04, 0, 0.36, 0.3, 0.46, hex);
+  tube(trolley, 0, -0.5, 0, 0.06, 1.0, 0xf0e2c0);
+  box(trolley, 0, -1.05, 0, 0.9, 0.28, 0.28, PALETTE[3]);
+
+  var g = { kind: "zip", zA: towerZ + 0.35, yA: topY + 0.28, zB: endZ, yB: endY + 0.3,
+            hang: 1.05, wireLen: wireLen, t: 0, speed: 0, node: trolley };
+  zipSync(g, false);
+  c.grabs.push(g);
+
+  var lz = endZ - 1.5;
+  var len = 7.5 - d * 2.2 + rand(0, 2);
+  addPlatform(c, lz, lz + len, landY, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 1.8 + wireLen / 7 + len / RUN_SPEED;
+  return { z: lz + len, y: landY };
+}
+
+// puts the trolley (and optionally the player) at the wire position for g.t
+function zipSync(g, withPlayer) {
+  var cz = g.zA + (g.zB - g.zA) * g.t;
+  var cy = g.yA + (g.yB - g.yA) * g.t;
+  if (g.node) g.node.position.set(0, cy, cz);
+  if (withPlayer) {
+    player.z = cz;
+    player.y = cy - g.hang - HAND_H;
+  }
+}
+
 // ---- the podium ----
 function buildPodium(c, z, y) {
   var g = c.group;
@@ -1213,7 +1292,8 @@ function buildPodium(c, z, y) {
   return { z: pz + 1.1, y: goldTop };
 }
 
-var BUILDERS = { gap: buildGap, rail: buildRail, swing: buildSwing, lache: buildLache, climb: buildClimb };
+var BUILDERS = { gap: buildGap, rail: buildRail, swing: buildSwing, lache: buildLache, climb: buildClimb,
+                 bounce: buildBounce, zip: buildZip };
 
 function generateCourse(index, startZ, startY) {
   var d = clamp((index - 1) / 9, 0, 1);
@@ -1232,9 +1312,10 @@ function generateCourse(index, startZ, startY) {
 
   // which obstacles are unlocked at this level
   var bag = ["gap", "gap", "gap", "rail"];
-  if (index >= 2) bag.push("swing", "gap");
+  if (index >= 2) bag.push("swing", "gap", "bounce");
   if (index >= 3) bag.push("lache", "climb", "swing");
-  if (index >= 5) bag.push("lache", "swing", "rail");
+  if (index >= 4) bag.push("zip", "bounce");
+  if (index >= 5) bag.push("lache", "swing", "rail", "zip");
 
   var n = Math.min(12, 5 + Math.floor((index - 1) * 0.8));
   var last = "";
@@ -1541,6 +1622,11 @@ function grabDistance(g, hz, hy) {
     var y = clamp(hy, g.y0, g.y1);
     return Math.hypot(hz - g.z, hy - y);
   }
+  if (g.kind === "zip") {
+    var cz2 = g.zA + (g.zB - g.zA) * g.t;
+    var cy2 = g.yA + (g.yB - g.yA) * g.t - g.hang;
+    return Math.hypot(hz - cz2, hy - cy2);
+  }
   return Infinity;
 }
 
@@ -1550,6 +1636,7 @@ function handleY(g) { return g.py - g.ropeLen * Math.cos(g.theta || 0); }
 function grabZ(g) {
   if (g.kind === "climb") return g.z;
   if (g.kind === "rail") return (g.z0 + g.z1) / 2;
+  if (g.kind === "zip") return g.zA + (g.zB - g.zA) * g.t;
   return g.pz;
 }
 
@@ -1597,6 +1684,10 @@ function attach(g) {
   } else if (g.kind === "climb") {
     player.z = g.z;
     player.y = clamp(player.y, g.y0 - HAND_H + 0.4, g.y1 - HAND_H);
+  } else if (g.kind === "zip") {
+    // carry the run speed into the trolley
+    g.speed = Math.max(2.5, player.vz * 0.8);
+    zipSync(g, true);
   }
   player.vz = 0; player.vy = 0;
   player.onGround = false;
@@ -1631,6 +1722,9 @@ function release(boost) {
   } else if (g.kind === "climb") {
     player.vz = 5.8;
     player.vy = 6.2;
+  } else if (g.kind === "zip") {
+    player.vz = clamp(g.speed * 1.05 + 0.8, 4.5, 12);
+    player.vy = 3.2;
   }
   if (boost) { player.vz += 0.4; player.vy += 0.4; }
   player.vz = clamp(player.vz, -6, 15);
@@ -1697,6 +1791,11 @@ function respawn() {
   player.releaseLock = 0;
   player.air = 0;
   player.lastGroundY = spawn.y;
+  // any used zipline trolleys ride back up to their start towers
+  for (var i = 0; i < grabs.length; i++) {
+    var g = grabs[i];
+    if (g.kind === "zip") { g.t = 0; g.speed = 0; zipSync(g, false); }
+  }
   levelTime = 0;
   state = PLAYING;
   fallMsg.classList.remove("visible");
@@ -1760,8 +1859,9 @@ function endCelebrate() {
   player.lastGroundY = spawn.y;
   state = PLAYING;
   updateHud();
-  if (level === 2) showTip("Level 2 - watch for swinging ropes", 3.0);
+  if (level === 2) showTip("Level 2 - swinging ropes and trampolines", 3.0);
   else if (level === 3) showTip("Level 3 - lache bars and rope climbs", 3.0);
+  else if (level === 4) showTip("Level 4 - jump for the zipline handle!", 3.0);
 }
 
 function startFall() {
@@ -1862,6 +1962,19 @@ function updateHanging(dt, jumpPressed) {
     }
     player.z = g.z;
     poseClimb(dt);
+  } else if (g.kind === "zip") {
+    // the trolley rolls downhill on its own and only ever speeds up
+    g.speed = Math.min(ZIP_MAX, g.speed + ZIP_ACCEL * dt);
+    g.t += (g.speed * dt) / g.wireLen;
+    if (g.t >= 1) {
+      g.t = 1;
+      zipSync(g, true);
+      // fly off the end of the wire onto the landing pad
+      release(false);
+      return;
+    }
+    zipSync(g, true);
+    poseHang(dt, 0.3);
   }
 
   if (player.hangT > 0.12 && (jumpPressed || player.jumpBuf > 0)) {
@@ -1938,7 +2051,25 @@ function updateFree(dt, jumpPressed) {
   // landing
   if (player.vy <= 0) {
     var p = platformUnder(player.z, prevY, player.y);
-    if (p) {
+    if (p && p.bounce) {
+      // trampoline: never lands, just fires the ninja back up
+      player.y = p.y;
+      player.vy = p.bounce;
+      player.onGround = false;
+      player.coyote = 0;
+      player.jumpBuf = 0;
+      player.jumpCut = false;
+      player.air = 0;
+      player.lastGroundY = p.y;
+      p.squash = 1;              // the skin dips, then springs back
+      sfxBounce();
+      puff(0, p.y, player.z, 10, 0.5, 2.2);
+      squashT = 0.18;
+      squashAmp = 1;
+      camImpulse(0.3);
+      startTrick(player.vy);     // a huge launch earns a huge trick
+      snapshotPose();
+    } else if (p) {
       var impact = -player.vy;   // captured before the landing zeroes it
       player.y = p.y;
       player.vy = 0;
@@ -2333,11 +2464,23 @@ function syncNinja(dt) {
 function animateRopes(now, dt) {
   for (var i = 0; i < grabs.length; i++) {
     var g = grabs[i];
-    if (!g.node) continue;
+    if (g.kind !== "pend" || !g.node) continue;
     if (Math.abs(g.pz - player.z) > 70) continue;
     if (player.hang === g) g.theta = player.theta;
     else g.theta = damp(g.theta || 0, Math.sin(now * 0.0012 + g.pz * 0.7) * 0.07, 2.5, dt);
     g.node.rotation.x = -g.theta;
+  }
+}
+
+// trampoline skins dip on impact and spring back
+function updatePads(dt) {
+  for (var i = 0; i < platforms.length; i++) {
+    var p = platforms[i];
+    if (!p.pad || !p.squash) continue;
+    p.squash = damp(p.squash, 0, 7, dt);
+    if (p.squash < 0.01) p.squash = 0;
+    p.pad.scale.y = 0.28 * (1 - 0.7 * p.squash);
+    p.pad.position.y = p.y - 0.14 - 0.4 * p.squash;
   }
 }
 
@@ -2372,6 +2515,7 @@ function frame(now) {
   updatePony(dt);
   syncNinja(dt);
   animateRopes(now, dt);
+  updatePads(dt);
   updateCamera(dt);
   updateNearFade(dt);
   updateClouds(player.z);
