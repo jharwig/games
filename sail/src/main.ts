@@ -128,16 +128,61 @@ window.addEventListener('keydown', (e) => {
 });
 window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
 
+// touch controls — hold-buttons feed a parallel key set (shown via CSS on
+// coarse-pointer devices only)
+const touchKeys = new Set<string>();
+const spiBtn = document.getElementById('btn-spi')!;
+const touchControlsEl = document.getElementById('touch-controls')!;
+// coarse pointer = phone/tablet; ?touch=1 forces it for desktop testing
+if (
+  window.matchMedia('(pointer: coarse)').matches ||
+  new URLSearchParams(location.search).has('touch')
+) {
+  document.body.classList.add('touch');
+}
+
+function bindHold(id: string, action: string): void {
+  const el = document.getElementById(id)!;
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    touchKeys.add(action);
+    el.classList.add('held');
+  });
+  const release = () => {
+    touchKeys.delete(action);
+    el.classList.remove('held');
+  };
+  el.addEventListener('pointerup', release);
+  el.addEventListener('pointercancel', release);
+  el.addEventListener('contextmenu', (e) => e.preventDefault()); // long-press
+}
+bindHold('btn-left', 'left');
+bindHold('btn-right', 'right');
+bindHold('btn-in', 'in');
+bindHold('btn-out', 'out');
+spiBtn.addEventListener('pointerdown', (e) => {
+  e.preventDefault();
+  if (autoPilot || (state !== 'countdown' && state !== 'racing')) return;
+  player.toggleSpinnaker();
+  hud.toast(player.spinUp ? 'HOISTING SPINNAKER' : 'DOUSING SPINNAKER', 1100);
+});
+spiBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+
+function vibrate(ms: number): void {
+  if ('vibrate' in navigator) navigator.vibrate(ms);
+}
+
 function readPlayerInput(): void {
   // screen-right is world -X from this camera, so heading-increase (+steer)
   // reads as a LEFT turn on screen — map the keys to screen direction
   let steer = 0;
-  if (keys.has('arrowleft') || keys.has('a')) steer += 1;
-  if (keys.has('arrowright') || keys.has('d')) steer -= 1;
+  if (keys.has('arrowleft') || keys.has('a') || touchKeys.has('left')) steer += 1;
+  if (keys.has('arrowright') || keys.has('d') || touchKeys.has('right')) steer -= 1;
   player.steer = steer;
   let trim = 0;
-  if (keys.has('arrowup') || keys.has('w')) trim -= 1; // sheet in
-  if (keys.has('arrowdown') || keys.has('s')) trim += 1; // ease out
+  if (keys.has('arrowup') || keys.has('w') || touchKeys.has('in')) trim -= 1; // sheet in
+  if (keys.has('arrowdown') || keys.has('s') || touchKeys.has('out')) trim += 1; // ease out
   player.trimInput = trim;
 }
 
@@ -199,6 +244,8 @@ function buildCoursePicker(): void {
 }
 
 document.getElementById('start-btn')!.addEventListener('click', startRace);
+document.getElementById('again-btn')!.addEventListener('click', startRace);
+document.getElementById('menu-btn')!.addEventListener('click', () => toMenu());
 buildMenu();
 buildCoursePicker();
 
@@ -215,6 +262,7 @@ function toMenu(): void {
   menuEl.classList.remove('hidden');
   resultsEl.classList.remove('visible');
   hud.setVisible(false);
+  touchControlsEl.classList.add('hidden');
   buildFleet();
 }
 
@@ -228,6 +276,8 @@ function startRace(): void {
   menuEl.classList.add('hidden');
   resultsEl.classList.remove('visible');
   hud.setVisible(true);
+  touchControlsEl.classList.remove('hidden');
+  touchKeys.clear();
   hud.clearBubbles();
   hailCooldown.clear();
   hud.toast('PRE-START — don’t cross the line before the gun!', 3000);
@@ -235,6 +285,7 @@ function startRace(): void {
 
 function finishRace(): void {
   state = 'finished';
+  touchControlsEl.classList.add('hidden');
   hud.showMessage('FINISH!', 2200);
   const table = document.getElementById('results-table')!;
   const rows = [...boats].sort((a, b) => course.progress(b) - course.progress(a));
@@ -315,7 +366,10 @@ function resolveCollisions(): void {
             guilty.penalty = 3.5;
             hud.say(boats.indexOf(guilty), 'SORRY!', elapsed, 1.6);
             hud.say(boats.indexOf(other), 'PROTEST!', elapsed, 1.6);
-            if (guilty === player) hud.toast('PENALTY — you had to keep clear! (3.5s)', 2800);
+            if (guilty === player) {
+              hud.toast('PENALTY — you had to keep clear! (3.5s)', 2800);
+              vibrate(120);
+            }
           }
         }
       }
@@ -467,7 +521,10 @@ function tick(dt: number): void {
       for (const b of boats) {
         if (course.startLineSide(b) >= 0) {
           b.ocs = true;
-          if (b === player) hud.toast('OCS! Return behind the start line ⟲', 3500);
+          if (b === player) {
+            hud.toast('OCS! Return behind the start line ⟲', 3500);
+            vibrate(120);
+          }
         }
       }
     } else if (n !== prevN && n <= 5) {
@@ -540,6 +597,7 @@ function tick(dt: number): void {
     const screenYaw = Math.atan2(-CAM_OFFSET.x, -CAM_OFFSET.z);
     const clock = state === 'countdown' ? -countdown : raceTime;
     hud.update(player, boats, wind, clock, position, course, screenYaw);
+    spiBtn.classList.toggle('on', player.spinUp);
   }
 }
 

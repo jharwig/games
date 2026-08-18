@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>REGATTA // offshore arcade</title>
   <style>
     :root {
@@ -18,9 +18,11 @@
       color: var(--ink);
       user-select: none;
       -webkit-user-select: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
     }
     #app { position: fixed; inset: 0; }
-    canvas.game { display: block; }
+    canvas.game { display: block; touch-action: none; }
 
     .overlay { position: fixed; inset: 0; pointer-events: none; }
 
@@ -196,6 +198,75 @@
     #results th { font-size: 10px; letter-spacing: 2px; opacity: .5; }
     #results tr.you td { color: var(--accent); font-weight: 800; }
     #results .hint { font-size: 13px; opacity: .65; font-weight: 700; letter-spacing: 1px; }
+    .results-btns { display: flex; gap: 14px; }
+    .results-btn {
+      pointer-events: auto; cursor: pointer;
+      font: inherit; font-size: 15px; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      color: #072033; background: linear-gradient(180deg, var(--accent), #ffb52e);
+      border: none; border-radius: 999px; padding: 12px 30px;
+      box-shadow: 0 5px 0 rgba(0,0,0,.3);
+    }
+    .results-btn.secondary { color: var(--ink); background: var(--panel); border: 2px solid rgba(255,255,255,0.18); }
+    .results-btn:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(0,0,0,.3); }
+
+    /* ---------- TOUCH CONTROLS ---------- */
+    #touch-controls { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+    #touch-controls.hidden { display: none !important; }
+    .tc-btn {
+      pointer-events: auto; position: absolute; touch-action: none;
+      display: flex; align-items: center; justify-content: center;
+      width: 76px; height: 76px; border-radius: 50%;
+      font: inherit; font-size: 26px; font-weight: 900; color: var(--ink);
+      background: var(--panel); border: 2px solid rgba(255,255,255,0.18);
+      backdrop-filter: blur(6px);
+    }
+    .tc-btn:active, .tc-btn.held { background: rgba(255, 209, 46, 0.28); border-color: var(--accent); color: var(--accent); }
+    .tc-btn.small { width: 62px; height: 62px; font-size: 13px; letter-spacing: 1px; font-style: italic; }
+    #btn-left  { left: calc(18px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); }
+    #btn-right { left: calc(108px + env(safe-area-inset-left)); bottom: calc(24px + env(safe-area-inset-bottom)); }
+    #btn-in  { right: calc(18px + env(safe-area-inset-right)); bottom: calc(114px + env(safe-area-inset-bottom)); }
+    #btn-out { right: calc(18px + env(safe-area-inset-right)); bottom: calc(24px + env(safe-area-inset-bottom)); }
+    #btn-spi { right: calc(94px + env(safe-area-inset-right)); bottom: calc(24px + env(safe-area-inset-bottom)); }
+    #btn-spi.on { background: linear-gradient(180deg, var(--accent), #ffb52e); color: #072033; border-color: var(--accent); }
+
+    .touch-only { display: none; }
+
+    /* body.touch is set from JS (pointer: coarse, or ?touch=1 for testing) */
+    body.touch #touch-controls { display: block; }
+    body.touch .touch-only { display: inline; }
+    body.touch .kbd-only { display: none; }
+    /* clear the bottom corners for the buttons */
+    body.touch #speedo { left: 16px; bottom: calc(112px + env(safe-area-inset-bottom)); min-width: 96px; padding: 8px 12px; }
+    body.touch #speedo .big { font-size: 32px; }
+    body.touch #trim-panel { right: 16px; bottom: calc(188px + env(safe-area-inset-bottom)); height: 150px; width: 56px; }
+
+    @media (max-width: 700px) {
+      #minimap canvas { width: 104px; height: 104px; }
+      #minimap { left: 12px; top: calc(12px + env(safe-area-inset-top)); padding: 6px; }
+      #wind-dial { right: 12px; top: calc(12px + env(safe-area-inset-top)); width: 84px; height: 84px; }
+      #wind-dial svg { width: 62px; height: 62px; }
+      #race-info { top: calc(8px + env(safe-area-inset-top)); gap: 12px; padding: 6px 12px; }
+      #race-info .lap, #race-info .pos { font-size: 18px; }
+      #race-info .time { font-size: 15px; }
+      #message { font-size: 56px; letter-spacing: -2px; }
+      #toast { font-size: 14px; bottom: 32%; width: max-content; max-width: 92vw; white-space: normal; text-align: center; }
+      #ocs-banner, #penalty-banner { font-size: 13px; padding: 6px 16px; width: max-content; max-width: 92vw; }
+
+      #menu { gap: 18px; padding: 20px 12px; overflow-y: auto; justify-content: flex-start; }
+      #menu h1 { font-size: 46px; letter-spacing: -2px; margin-top: max(10px, env(safe-area-inset-top)); }
+      #menu .tag { font-size: 10px; letter-spacing: 4px; margin-top: 6px; }
+      .fleet { flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 100%; }
+      .course-picker { flex-wrap: wrap; justify-content: center; max-width: 100%; }
+      .controls-hint { max-width: 100%; }
+      .boat-card { width: 46vw; max-width: 170px; padding: 12px; }
+      .boat-card h3 { font-size: 17px; }
+      .course-chip { font-size: 11px; padding: 8px 14px; }
+      #start-btn { font-size: 18px; padding: 13px 44px; }
+      .controls-hint { font-size: 11px; padding: 0 14px 20px; }
+
+      #results h2 { font-size: 40px; }
+      #results td, #results th { padding: 8px 12px; font-size: 13px; }
+    }
   </style>
 </head>
 <body>
@@ -240,6 +311,14 @@
     <div id="toast"></div>
   </div>
 
+  <div id="touch-controls" class="hidden">
+    <button class="tc-btn" id="btn-left" aria-label="steer left">◀</button>
+    <button class="tc-btn" id="btn-right" aria-label="steer right">▶</button>
+    <button class="tc-btn small" id="btn-in" aria-label="sheet in">IN</button>
+    <button class="tc-btn small" id="btn-out" aria-label="ease out">OUT</button>
+    <button class="tc-btn small" id="btn-spi" aria-label="toggle spinnaker">SPI</button>
+  </div>
+
   <div id="menu">
     <div>
       <h1>REGATTA<span>//</span></h1>
@@ -249,7 +328,7 @@
     <div class="course-picker" id="course-picker"></div>
     <button id="start-btn">RACE ▸</button>
     <div class="controls-hint">
-      <b>◀ ▶</b> / <b>A D</b> — steer &nbsp;•&nbsp; <b>▲ ▼</b> / <b>W S</b> — sheet in / ease out &nbsp;•&nbsp; <b>SPACE</b> — spinnaker &nbsp;•&nbsp; <b>R</b> — restart<br/>
+      <span class="kbd-only"><b>◀ ▶</b> / <b>A D</b> — steer &nbsp;•&nbsp; <b>▲ ▼</b> / <b>W S</b> — sheet in / ease out &nbsp;•&nbsp; <b>SPACE</b> — spinnaker &nbsp;•&nbsp; <b>R</b> — restart</span><span class="touch-only"><b>◀ ▶</b> — steer &nbsp;•&nbsp; <b>IN / OUT</b> — sheet in / ease out &nbsp;•&nbsp; <b>SPI</b> — spinnaker</span><br/>
       15s pre-start: maneuver behind the line, cross it early and you're OCS (go back!).<br/>
       green mark on the sheet gauge = perfect trim. beam reach is fast; fly the kite on the runs.
     </div>
@@ -258,7 +337,11 @@
   <div id="results">
     <h2 id="results-title">FINISH!</h2>
     <table id="results-table"></table>
-    <div class="hint">PRESS R OR ENTER TO RACE AGAIN</div>
+    <div class="results-btns">
+      <button class="results-btn" id="again-btn">RACE AGAIN ▸</button>
+      <button class="results-btn secondary" id="menu-btn">MENU</button>
+    </div>
+    <div class="hint kbd-only">PRESS R OR ENTER TO RACE AGAIN</div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>
