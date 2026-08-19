@@ -19,7 +19,10 @@ to `main` (https://jharwig.github.io/games/). The root is a PWA shell:
    faithful to the designer's intent; ask before changing game design.
 2. Use TypeScript for new projects (Vite app like `sail/`) to keep code
    organized and type-safe.
-3. Update all three of: `index.html` (hub card), `sw.js` (PRECACHE list —
+3. 3D games fade scenery that gets close to the camera so it never blocks
+   the view of the player — see `updateNearFade` in `ninja/index.html` for
+   the reference implementation.
+4. Update all three of: `index.html` (hub card), `sw.js` (PRECACHE list —
    built apps are precached automatically by the workflow, static files are
    not), and `README.md` (player-facing description + controls + designer).
 

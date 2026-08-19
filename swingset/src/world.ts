@@ -154,6 +154,8 @@ interface Tree extends TreeInfo {
   stump: THREE.Mesh;
   topAnchor: THREE.Object3D;
   foliage: THREE.Mesh[];
+  fadeMeshes: THREE.Mesh[];
+  fadeOp: number;
   anim: TreeAnim;
   animT: number;
   fallAngle: number;
@@ -531,6 +533,8 @@ export function createWorld(ctx: GameCtx): WorldApi {
         stump,
         topAnchor,
         foliage,
+        fadeMeshes: [trunk, ...foliage, stump],
+        fadeOp: 1,
         anim: 'none',
         animT: 0,
         fallAngle: 0,
@@ -741,6 +745,65 @@ export function createWorld(ctx: GameCtx): WorldApi {
     }
   }
 
+  // --- near-camera fade ------------------------------------------------------
+  // Trees the camera backs into turn see-through instead of clipping the lens
+  // (repo convention — same behaviour as ninja's updateNearFade).
+
+  const NEAR_FADE_START = 4.5; // lens-to-trunk distance where the fade begins
+  const NEAR_FADE_END = 1.2; // fully faded by here
+  const NEAR_FADE_MIN = 0.12; // faded trees stay faintly visible
+  const NEAR_FADE_MARGIN = 1.5; // approximate canopy / trunk radius
+
+  const fadeBase = new THREE.Vector3();
+  const fadeDir = new THREE.Vector3();
+  const fadeRel = new THREE.Vector3();
+
+  /** Distance from the camera to the trunk line (base → top anchor), so a
+   *  fallen trunk fades along its length too. */
+  function treeCameraDistance(t: Tree, cam: THREE.Vector3): number {
+    fadeBase.copy(t.position);
+    t.topPos(fadeDir).sub(fadeBase);
+    fadeRel.copy(cam).sub(fadeBase);
+    const len2 = fadeDir.lengthSq();
+    const u = len2 > 0 ? clamp(fadeRel.dot(fadeDir) / len2, 0, 1) : 0;
+    return fadeBase.addScaledVector(fadeDir, u).distanceTo(cam);
+  }
+
+  function applyMeshFade(m: THREE.Mesh, op: number): void {
+    const ud = m.userData as { baseMat?: THREE.Material; fadeMat?: THREE.Material };
+    if (op > 0.995) {
+      if (ud.baseMat && m.material === ud.fadeMat) m.material = ud.baseMat;
+      return;
+    }
+    // Foliage swaps between the shared leaf materials at runtime — rebuild
+    // the clone when the material it was made from is no longer current.
+    if (m.material !== ud.fadeMat && m.material !== ud.baseMat) {
+      ud.fadeMat?.dispose();
+      ud.fadeMat = undefined;
+      ud.baseMat = m.material as THREE.Material;
+    }
+    if (!ud.fadeMat) {
+      ud.fadeMat = ud.baseMat!.clone();
+      ud.fadeMat.transparent = true;
+    }
+    ud.fadeMat.opacity = op;
+    m.material = ud.fadeMat;
+  }
+
+  function updateNearFade(dt: number): void {
+    const cam = ctx.camera.position;
+    for (const t of trees) {
+      let target = 1;
+      if (t.tilt.visible) {
+        const d = treeCameraDistance(t, cam) - NEAR_FADE_MARGIN;
+        target = clamp((d - NEAR_FADE_END) / (NEAR_FADE_START - NEAR_FADE_END), 0, 1);
+        target = NEAR_FADE_MIN + (1 - NEAR_FADE_MIN) * target;
+      }
+      t.fadeOp = damp(t.fadeOp, target, 12, dt);
+      for (const m of t.fadeMeshes) applyMeshFade(m, t.fadeOp);
+    }
+  }
+
   function update(dt: number): void {
     time += dt;
     waterTime.value = time;
@@ -752,6 +815,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     sky.position.set(ctx.camera.position.x, 0, ctx.camera.position.z);
     updateSwings(dt);
     updateTrees(dt);
+    updateNearFade(dt);
 
     // Drifting clouds.
     for (const c of clouds) {
