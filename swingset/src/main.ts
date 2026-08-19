@@ -3,6 +3,7 @@
 // the vocabulary and types.ts for the module contracts.
 
 import * as THREE from 'three';
+import { OutlineEffect } from 'three/examples/jsm/effects/OutlineEffect.js';
 import {
   BLAST_RADIUS,
   EventBus,
@@ -35,12 +36,19 @@ const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap; // crisp-edged shadows suit the cel look
 app.appendChild(renderer.domElement);
 
+// Ink outline pass: draws an inverted-hull outline around every mesh whose
+// material doesn't opt out via userData.outlineParameters (see toon.ts).
+const effect = new OutlineEffect(renderer, {
+  defaultThickness: 0.0032,
+  defaultColor: [0.10, 0.12, 0.20],
+});
+
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0xbfd8e8, FOG_NEAR, FOG_FAR);
-scene.background = new THREE.Color(0xbfd8e8);
+scene.fog = new THREE.Fog(0x9fd8f0, FOG_NEAR, FOG_FAR);
+scene.background = new THREE.Color(0x9fd8f0);
 
 const camera = new THREE.PerspectiveCamera(
   60,
@@ -310,7 +318,7 @@ function frame(now: number): void {
     ctx.input.mutePressed = false;
     ctx.input.anyPressed = false;
   }
-  renderer.render(scene, camera);
+  effect.render(scene, camera);
 }
 
 ctx.ui.setScreen('title');

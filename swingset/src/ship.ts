@@ -18,6 +18,7 @@ import {
   WATER_Y,
 } from './types';
 import { clamp, damp } from './util';
+import { noOutline, toonMat } from './toon';
 
 // --- tuning -----------------------------------------------------------------
 
@@ -94,13 +95,13 @@ function plankTexture(base: string, line: string, rows: number): THREE.Texture {
 
 function sailTexture(): THREE.Texture {
   return makeTexture(128, 128, (c) => {
-    c.fillStyle = '#e8e1cf';
+    c.fillStyle = '#f8f2e0';
     c.fillRect(0, 0, 128, 128);
-    for (let i = 0; i < 500; i++) {
-      c.fillStyle = `rgba(120,110,90,${Math.random() * 0.08})`;
+    for (let i = 0; i < 320; i++) {
+      c.fillStyle = `rgba(140,125,95,${Math.random() * 0.06})`;
       c.fillRect(Math.random() * 128, Math.random() * 128, 3, 2);
     }
-    c.strokeStyle = 'rgba(150,140,120,0.55)';
+    c.strokeStyle = 'rgba(160,145,115,0.4)';
     c.lineWidth = 1;
     for (let x = 16; x < 128; x += 32) {
       c.beginPath();
@@ -108,6 +109,11 @@ function sailTexture(): THREE.Texture {
       c.lineTo(x, 128);
       c.stroke();
     }
+    // pirate-red band along the head of the sail
+    c.fillStyle = '#c83c30';
+    c.fillRect(0, 0, 128, 16);
+    c.fillStyle = 'rgba(90,20,14,0.5)';
+    c.fillRect(0, 15, 128, 2);
   });
 }
 
@@ -304,7 +310,7 @@ interface ShipModel {
   cannons: CannonNode[];
   flag: THREE.Object3D;
   sails: THREE.Object3D[];
-  hullMats: THREE.MeshStandardMaterial[];
+  hullMats: THREE.MeshToonMaterial[];
   halfLen: number;
   halfBeam: number;
 }
@@ -357,15 +363,15 @@ type Phase = 'hidden' | 'sailIn' | 'anchored' | 'moving' | 'trek' | 'sinking' | 
 
 export function createShip(ctx: GameCtx): ShipApi {
   // Shared assets (built once, never disposed).
-  const texHull = plankTexture('#6d4a2c', 'rgba(45,28,14,0.75)', 9);
+  const texHull = plankTexture('#8a5a32', 'rgba(50,30,14,0.7)', 9);
   texHull.repeat.set(2.2, 1.6);
-  const texDeck = plankTexture('#8a6740', 'rgba(60,40,20,0.6)', 14);
+  const texDeck = plankTexture('#a87c50', 'rgba(70,46,24,0.55)', 14);
   texDeck.repeat.set(3, 3);
   const texSail = sailTexture();
   const texFlag = flagTexture();
   const texPuff = puffTexture();
 
-  const smoke = new ParticlePool(260, 1.5, -0.4, new THREE.Color(0xbfd8e8), THREE.NormalBlending, texPuff);
+  const smoke = new ParticlePool(260, 1.5, -0.4, new THREE.Color(0xe4f2f8), THREE.NormalBlending, texPuff);
   const debris = new ParticlePool(300, 0.42, 12, new THREE.Color(0x2a1a0c), THREE.NormalBlending, texPuff);
   const sparks = new ParticlePool(160, 0.3, 6, new THREE.Color(0x100800), THREE.AdditiveBlending, texPuff);
   const splash = new ParticlePool(220, 0.55, 11, new THREE.Color(0xa8c8dc), THREE.NormalBlending, texPuff);
@@ -400,12 +406,14 @@ export function createShip(ctx: GameCtx): ShipApi {
   for (let i = 0; i < 8; i++) {
     const m = new THREE.Mesh(
       decalGeo,
-      new THREE.MeshBasicMaterial({
-        color: 0x2b1d0f,
-        transparent: true,
-        opacity: 0,
-        depthWrite: false,
-      }),
+      noOutline(
+        new THREE.MeshBasicMaterial({
+          color: 0x2b1d0f,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+        }),
+      ),
     );
     m.visible = false;
     m.renderOrder = 1;
@@ -417,7 +425,7 @@ export function createShip(ctx: GameCtx): ShipApi {
 
   // Cannonballs.
   const ballGeo = new THREE.SphereGeometry(BALL_RADIUS, 12, 10);
-  const ballMat = new THREE.MeshStandardMaterial({ color: 0x23262b, roughness: 0.75, metalness: 0.35 });
+  const ballMat = toonMat({ color: 0x23262e });
   const ballPool: THREE.Mesh[] = [];
   const balls: Ball[] = [];
   let nextBallId = 1;
@@ -451,12 +459,13 @@ export function createShip(ctx: GameCtx): ShipApi {
     bob.add(body);
     body.scale.setScalar(scale);
 
-    const hullMats: THREE.MeshStandardMaterial[] = [];
-    const woodMat = new THREE.MeshStandardMaterial({ map: texHull, color: 0xffffff, roughness: 0.85 });
-    const deckMat = new THREE.MeshStandardMaterial({ map: texDeck, color: 0xffffff, roughness: 0.9 });
-    const trimMat = new THREE.MeshStandardMaterial({ color: 0x4a2f19, roughness: 0.8 });
-    const ironMat = new THREE.MeshStandardMaterial({ color: 0x1d2024, roughness: 0.5, metalness: 0.7 });
-    hullMats.push(woodMat, deckMat, trimMat);
+    const hullMats: THREE.MeshToonMaterial[] = [];
+    const woodMat = toonMat({ map: texHull, color: 0xffffff });
+    const deckMat = toonMat({ map: texDeck, color: 0xffffff });
+    const trimMat = toonMat({ color: 0x4a3320 });
+    const accentMat = toonMat({ color: 0xc83c30 }); // pirate-red rails + roof
+    const ironMat = toonMat({ color: 0x23283a });
+    hullMats.push(woodMat, deckMat, trimMat, accentMat);
 
     const shape = hullShape(HULL_LEN, HULL_BEAM);
     const hullGeo = new THREE.ExtrudeGeometry(shape, {
@@ -484,7 +493,7 @@ export function createShip(ctx: GameCtx): ShipApi {
     for (const side of [1, -1]) {
       const rail = new THREE.Mesh(
         new THREE.BoxGeometry(HULL_LEN * 0.78, 0.55, 0.2),
-        trimMat,
+        accentMat,
       );
       rail.position.set(-HULL_LEN * 0.02, DECK_Y + 0.25, side * HULL_BEAM * 0.44);
       body.add(rail);
@@ -500,7 +509,7 @@ export function createShip(ctx: GameCtx): ShipApi {
     body.add(castle);
     const roof = new THREE.Mesh(
       new THREE.BoxGeometry(HULL_LEN * 0.22, 0.16, HULL_BEAM * 0.78),
-      trimMat,
+      accentMat,
     );
     roof.position.set(-HULL_LEN * 0.36, DECK_Y + 1.38, 0);
     body.add(roof);
@@ -516,10 +525,9 @@ export function createShip(ctx: GameCtx): ShipApi {
 
     // Masts + sails.
     const sails: THREE.Object3D[] = [];
-    const sailMat = new THREE.MeshStandardMaterial({
+    const sailMat = toonMat({
       map: texSail,
       color: 0xffffff,
-      roughness: 0.95,
       side: THREE.DoubleSide,
     });
     hullMats.push(sailMat);
@@ -589,14 +597,16 @@ export function createShip(ctx: GameCtx): ShipApi {
     const tall = mastTops[1] ?? mastTops[0];
     const flag = new THREE.Mesh(
       new THREE.PlaneGeometry(1.7, 1.15),
-      new THREE.MeshBasicMaterial({ map: texFlag, side: THREE.DoubleSide, transparent: true }),
+      noOutline(
+        new THREE.MeshBasicMaterial({ map: texFlag, side: THREE.DoubleSide, transparent: true }),
+      ),
     );
     flag.position.set(tall.x + 0.9, tall.y - 0.9, 0);
     body.add(flag);
 
     // Cannons on the SHORE-FACING (+Z) side.
     const cannons: CannonNode[] = [];
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffb020 });
+    const glowMat = noOutline(new THREE.MeshBasicMaterial({ color: 0xffb020 }));
     for (let i = 0; i < cannonCount; i++) {
       const t = cannonCount === 1 ? 0.5 : i / (cannonCount - 1);
       const x = -HULL_LEN * 0.24 + t * HULL_LEN * 0.5;
@@ -648,6 +658,25 @@ export function createShip(ctx: GameCtx): ShipApi {
         sputter: 0,
       });
     }
+
+    // White foam ring hugging the hull at the waterline (Wind Waker style).
+    const foamGeo = new THREE.TorusGeometry(1, 0.14, 5, 28);
+    foamGeo.rotateX(Math.PI / 2);
+    const foam = new THREE.Mesh(
+      foamGeo,
+      noOutline(
+        new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.85,
+          depthWrite: false,
+        }),
+      ),
+    );
+    foam.scale.set(HULL_LEN * 0.60 * scale, 0.5, HULL_BEAM * 0.95 * scale);
+    foam.position.y = 0.12;
+    foam.renderOrder = 2;
+    bob.add(foam);
 
     root.position.y = WATER_Y;
     ctx.scene.add(root);

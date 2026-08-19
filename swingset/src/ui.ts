@@ -35,18 +35,19 @@ const CSS = `
 #ui .pots-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 #ui .pots-plank {
-  background: linear-gradient(180deg, rgba(63,39,22,.86), rgba(41,25,14,.9));
-  border: 1px solid rgba(214,175,110,.45);
-  border-radius: 8px;
-  box-shadow: 0 2px 0 rgba(0,0,0,.35), inset 0 1px 0 rgba(255,231,181,.14);
+  background: linear-gradient(180deg, #f9eecf, #eeddb2);
+  border: 2px solid #7a5028;
+  border-radius: 10px;
+  box-shadow: 0 3px 0 rgba(60,35,10,.4), inset 0 1px 0 rgba(255,255,255,.5);
   padding: 5px 10px;
   font-size: 15px; line-height: 1.1; letter-spacing: .02em;
   white-space: nowrap;
+  color: #4a3018;
 }
-#ui .pots-plank b { color: #f7d089; font-weight: 700; }
+#ui .pots-plank b { color: #4a3018; font-weight: 700; }
 #ui .pots-plank .lbl {
   font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
-  color: rgba(240,220,180,.62); display: block;
+  color: rgba(122,80,40,.85); display: block;
 }
 
 #ui .pots-hearts { display: flex; gap: 3px; align-items: center; }
@@ -57,8 +58,8 @@ const CSS = `
 #ui .pots-hpwrap.hidden { visibility: hidden; }
 #ui .pots-hpbar {
   height: 10px; border-radius: 5px; overflow: hidden;
-  background: rgba(20,12,7,.75);
-  border: 1px solid rgba(214,175,110,.5);
+  background: rgba(122,80,40,.3);
+  border: 1px solid #7a5028;
 }
 #ui .pots-hpfill {
   height: 100%; width: 100%;
@@ -96,8 +97,12 @@ const CSS = `
 
 #ui .pots-incoming {
   position: absolute; left: 50%; top: 9%; transform: translateX(-50%);
-  font-size: clamp(18px, 5vw, 34px); font-weight: 800; letter-spacing: .18em;
-  color: #ffd0a0; text-shadow: 0 0 14px rgba(255,90,40,.9), 0 2px 4px rgba(0,0,0,.7);
+  font-size: clamp(18px, 5vw, 34px); font-weight: 900; letter-spacing: .14em;
+  color: #ffd23e;
+  text-shadow:
+    -2px -2px 0 #5c3018, 2px -2px 0 #5c3018,
+    -2px 2px 0 #5c3018, 2px 2px 0 #5c3018,
+    0 4px 0 rgba(60,30,10,.45), 0 0 18px rgba(255,120,40,.55);
   opacity: 0; transition: opacity .12s linear;
 }
 #ui .pots-incoming.show { opacity: 1; }

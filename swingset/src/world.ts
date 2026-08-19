@@ -23,6 +23,16 @@ import {
   type WorldApi,
 } from './types';
 import { clamp, damp } from './util';
+import {
+  grassPatchTexture,
+  inkWeight,
+  noOutline,
+  seaSplotchTexture,
+  shoreFoamTexture,
+  skyTexture,
+  toonMat,
+  woodGrainTexture,
+} from './toon';
 
 // --- tuning ----------------------------------------------------------------
 
@@ -92,14 +102,18 @@ function landHeight(x: number, z: number): number {
 
 // --- shared geometry / materials -------------------------------------------
 
-const barkMat = new THREE.MeshLambertMaterial({ color: 0x6b4d33 });
-const woodMat = new THREE.MeshLambertMaterial({ color: 0x8a6440 });
-const metalMat = new THREE.MeshLambertMaterial({ color: 0x9aa2a8 });
-const chainMat = new THREE.MeshLambertMaterial({ color: 0x3b3f44 });
-const seatMat = new THREE.MeshLambertMaterial({ color: 0x2f3438 });
-const leafMat = new THREE.MeshLambertMaterial({ color: 0x466b30, flatShading: true });
-const leafWiltMat = new THREE.MeshLambertMaterial({ color: 0x7a6a34, flatShading: true });
-const cloudMat = new THREE.MeshBasicMaterial({ color: 0xf4f8fb, fog: false });
+const grainTex = woodGrainTexture();
+const barkMat = toonMat({ color: 0x8a5a30, map: grainTex });
+const woodMat = toonMat({ color: 0xc98a46, map: grainTex });
+const metalMat = toonMat({ color: 0x3fb8c4 });
+const chainMat = toonMat({ color: 0x3a4560 });
+const seatMat = toonMat({ color: 0x46577a });
+const leafMat = toonMat({ color: 0x4fae32, flatShading: true });
+const leafWiltMat = toonMat({ color: 0xa08c3c, flatShading: true });
+const cloudMat = inkWeight(
+  new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
+  0.007,
+);
 
 const unitCylGeo = new THREE.CylinderGeometry(1, 1, 1, 8); // scaled per use
 const chainGeo = new THREE.CylinderGeometry(0.026, 0.026, 1, 5);
@@ -153,10 +167,12 @@ export function createWorld(ctx: GameCtx): WorldApi {
 
   // --- lighting ------------------------------------------------------------
 
-  const hemi = new THREE.HemisphereLight(0xcfe4f2, 0x53663a, 0.75);
+  // Cel lighting: a strong warm key against a modest cool fill, so the toon
+  // ramp lands on a crisp light/shadow boundary instead of a mushy midtone.
+  const hemi = new THREE.HemisphereLight(0xd8f0fc, 0x5a7a3c, 0.5);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xfff0d6, 1.5);
+  const sun = new THREE.DirectionalLight(0xfff2d0, 2.0);
   sun.position.set(-42, 66, 38);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -171,6 +187,23 @@ export function createWorld(ctx: GameCtx): WorldApi {
   scene.add(sun);
   scene.add(sun.target);
   const sunOffset = new THREE.Vector3(-42, 66, 38);
+
+  // --- sky dome ------------------------------------------------------------
+
+  // Gradient dome that follows the camera (kept inside the far plane).
+  const sky = new THREE.Mesh(
+    new THREE.SphereGeometry(470, 24, 12),
+    noOutline(
+      new THREE.MeshBasicMaterial({
+        map: skyTexture(),
+        side: THREE.BackSide,
+        fog: false,
+        depthWrite: false,
+      }),
+    ),
+  );
+  sky.renderOrder = -1;
+  scene.add(sky);
 
   // --- terrain -------------------------------------------------------------
 
@@ -189,8 +222,8 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const pos = groundGeo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
     const grass = new THREE.Color();
-    const sand = new THREE.Color(0xcbb489);
-    const wet = new THREE.Color(0xa2916d);
+    const sand = new THREE.Color(0xf2d98f);
+    const wet = new THREE.Color(0xd4b978);
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -198,7 +231,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
       pos.setY(i, landHeight(x, z));
 
       const v = hillNoise(x * 2.3, z * 2.1);
-      grass.setHSL(0.255 + v * 0.012, 0.34 + v * 0.05, 0.31 + v * 0.035);
+      grass.setHSL(0.26 + v * 0.01, 0.58 + v * 0.05, 0.42 + v * 0.03);
       const sandT = 1 - smoothstep(6.5, 12, z); // sand strip along the shore
       const wetT = 1 - smoothstep(-1, 2.2, z);
       c.copy(grass).lerp(sand, sandT).lerp(wet, wetT);
@@ -211,9 +244,11 @@ export function createWorld(ctx: GameCtx): WorldApi {
     groundGeo.computeVertexNormals();
   }
 
+  const grassTex = grassPatchTexture();
+  grassTex.repeat.set(tw / 24, td / 24); // one patch tile per ~24 m
   const ground = new THREE.Mesh(
     groundGeo,
-    new THREE.MeshLambertMaterial({ vertexColors: true }),
+    noOutline(toonMat({ vertexColors: true, map: grassTex })),
   );
   ground.receiveShadow = true;
   scene.add(ground);
@@ -221,11 +256,16 @@ export function createWorld(ctx: GameCtx): WorldApi {
   // --- water ---------------------------------------------------------------
 
   const waterTime = { value: 0 };
-  const waterMat = new THREE.MeshLambertMaterial({
-    color: 0x2c5e78,
-    transparent: true,
-    opacity: 0.93,
-  });
+  const seaTex = seaSplotchTexture();
+  seaTex.repeat.set(52, 30); // splotch tiles ~28 m across the water plane
+  const waterMat = noOutline(
+    toonMat({
+      color: 0xffffff, // the splotch texture carries the blues
+      map: seaTex,
+      transparent: true,
+      opacity: 0.95,
+    }),
+  );
   waterMat.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = waterTime;
     shader.vertexShader = shader.vertexShader
@@ -244,8 +284,8 @@ export function createWorld(ctx: GameCtx): WorldApi {
       .replace(
         '#include <dithering_fragment>',
         `#include <dithering_fragment>
-        float foam = clamp(vWave * 0.34 + 0.34, 0.0, 1.0);
-        gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.60, 0.79, 0.84), foam * 0.42);`,
+        float foam = smoothstep(0.55, 1.6, vWave);
+        gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.96, 0.99, 1.0), foam * 0.75);`,
       );
   };
 
@@ -258,6 +298,26 @@ export function createWorld(ctx: GameCtx): WorldApi {
   water.position.y = WATER_Y;
   water.renderOrder = 1;
   scene.add(water);
+
+  // White scallop foam where the sea meets the sand.
+  const foamTex = shoreFoamTexture();
+  foamTex.repeat.set(140, 1);
+  const foamGeo = new THREE.PlaneGeometry(waterW, 3.2);
+  foamGeo.rotateX(-Math.PI / 2);
+  const shoreFoam = new THREE.Mesh(
+    foamGeo,
+    noOutline(
+      new THREE.MeshBasicMaterial({
+        map: foamTex,
+        transparent: true,
+        depthWrite: false,
+        opacity: 0.9,
+      }),
+    ),
+  );
+  shoreFoam.position.set(60, WATER_Y + 0.26, WATER_EDGE_Z - 1.2);
+  shoreFoam.renderOrder = 2;
+  scene.add(shoreFoam);
 
   // --- clouds --------------------------------------------------------------
 
@@ -684,6 +744,12 @@ export function createWorld(ctx: GameCtx): WorldApi {
   function update(dt: number): void {
     time += dt;
     waterTime.value = time;
+    // Splotch pattern drifts slowly; shore foam breathes in and out.
+    seaTex.offset.x = time * 0.004;
+    seaTex.offset.y = Math.sin(time * 0.35) * 0.01;
+    foamTex.offset.x = time * 0.012;
+    shoreFoam.position.z = WATER_EDGE_Z - 1.2 + Math.sin(time * 0.8) * 0.25;
+    sky.position.set(ctx.camera.position.x, 0, ctx.camera.position.z);
     updateSwings(dt);
     updateTrees(dt);
 

@@ -17,6 +17,7 @@ import {
   type ToolsApi,
   type TreeInfo,
 } from './types';
+import { noOutline, toonMat } from './toon';
 
 // --- tuning ----------------------------------------------------------------
 
@@ -64,14 +65,14 @@ const _v4 = new THREE.Vector3();
 // --- shared materials -------------------------------------------------------
 
 const MAT = {
-  wood: new THREE.MeshLambertMaterial({ color: 0x8b5a2b }),
-  bark: new THREE.MeshLambertMaterial({ color: 0x6b4423 }),
-  steel: new THREE.MeshLambertMaterial({ color: 0x9aa4ad }),
-  darkSteel: new THREE.MeshLambertMaterial({ color: 0x4a5158 }),
-  iron: new THREE.MeshLambertMaterial({ color: 0x2e3338 }),
-  orange: new THREE.MeshLambertMaterial({ color: 0xef7d1a }),
-  red: new THREE.MeshLambertMaterial({ color: 0xd8392b }),
-  black: new THREE.MeshLambertMaterial({ color: 0x1d2126 }),
+  wood: toonMat({ color: 0xb0763c }),
+  bark: toonMat({ color: 0x8a5228 }),
+  steel: toonMat({ color: 0x8a94a8 }),
+  darkSteel: toonMat({ color: 0x4a5468 }),
+  iron: toonMat({ color: 0x2e3442 }),
+  orange: toonMat({ color: 0xff8c1a }),
+  red: toonMat({ color: 0xe0402e }),
+  black: toonMat({ color: 0x20242e }),
 };
 
 // --- procedural tool models -------------------------------------------------
@@ -292,13 +293,13 @@ export function createTools(ctx: GameCtx): ToolsApi {
   const splashGeo = new THREE.ConeGeometry(0.55, 1.1, 8, 1, true);
   const splashes: Splash[] = [];
   for (let i = 0; i < 12; i++) {
-    const mat = new THREE.MeshBasicMaterial({
+    const mat = noOutline(new THREE.MeshBasicMaterial({
       color: 0xffffff,
       transparent: true,
       opacity: 0,
       depthWrite: false,
       side: THREE.DoubleSide,
-    });
+    }));
     const mesh = new THREE.Mesh(splashGeo, mat);
     mesh.visible = false;
     group.add(mesh);

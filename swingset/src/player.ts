@@ -17,6 +17,7 @@ import {
   type TreeInfo,
 } from './types';
 import { clamp, damp, lerp } from './util';
+import { toonMat } from './toon';
 
 // --- body proportions (total height ~1.3m) ---------------------------------
 
@@ -79,8 +80,8 @@ interface Rig {
   disposables: Array<THREE.BufferGeometry | THREE.Material>;
 }
 
-function mat(color: number, rough = 0.85): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, roughness: rough, flatShading: true });
+function mat(color: number): THREE.MeshToonMaterial {
+  return toonMat({ color, flatShading: true });
 }
 
 function makeLimb(
@@ -127,11 +128,11 @@ function makeLimb(
 /** Build a low-poly kid facing -Z (toward the water). */
 function buildRig(kind: CharacterKind, carryAnchor: THREE.Object3D): Rig {
   const disposables: Rig['disposables'] = [];
-  const skin = mat(kind === 'boy' ? 0xe0ac86 : 0xd9a074);
-  const hair = mat(kind === 'boy' ? 0x5a3a22 : 0x704627);
-  const shirt = mat(kind === 'boy' ? 0x4a7a55 : 0xc75c7a);
-  const pants = mat(kind === 'boy' ? 0x4d5b78 : 0x6b5aa0);
-  const shoe = mat(0x3b3630);
+  const skin = mat(kind === 'boy' ? 0xf2c090 : 0xecb282);
+  const hair = mat(kind === 'boy' ? 0x8a5228 : 0x9a5c2e);
+  const shirt = mat(kind === 'boy' ? 0x4cc264 : 0xf06a92);
+  const pants = mat(kind === 'boy' ? 0x4a6ad8 : 0x8a5cc8);
+  const shoe = mat(0x3c4258);
   disposables.push(skin, hair, shirt, pants, shoe);
 
   const root = new THREE.Group();
@@ -185,7 +186,7 @@ function buildRig(kind: CharacterKind, carryAnchor: THREE.Object3D): Rig {
   // eyes (a hint of a face, facing -Z)
   const eyeGeo = new THREE.SphereGeometry(0.018, 6, 5);
   disposables.push(eyeGeo);
-  const eyeMat = mat(0x241c14, 0.5);
+  const eyeMat = mat(0x241c14);
   disposables.push(eyeMat);
   for (const ex of [-0.05, 0.05]) {
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
