@@ -2,6 +2,8 @@
 
 Arcade sailing race game. TypeScript + Three.js + Vite. No test framework;
 validation is done with headless sim harnesses + headless-Chrome screenshots.
+Deploys with the repo's GitHub Pages workflow, which builds this directory
+(pnpm) and publishes `dist/` under `/sail/` — see the root `CLAUDE.md`.
 
 ## Commands
 
@@ -14,10 +16,11 @@ validation is done with headless sim harnesses + headless-Chrome screenshots.
   - `scripts/airace.ts` — full 4-boat AI race; asserts everyone finishes and prints lap times (~200s total is healthy).
   - `scripts/pose.ts` — per-2s trace of one AI mono + final rig/cloth world positions.
   - `scripts/capstats.ts` — whitecap emission stats (deep/crest fractions, clusters/s). Use after touching seabed.ts or the wave terms.
+  - `scripts/flutter.ts` — sail-cloth agitation on a steady course: trimmed should be near-still, eased/luffing should shake. Use after touching cloth.ts or the trim model.
 
 ## Architecture (src/)
 
-- `main.ts` — scene/renderer, game state machine (menu/countdown/racing/finished), fixed-timestep loop, collisions, camera, right-of-way hails, mark pointer. `?auto=1` puts the player on autopilot; `?race=1` skips the menu and starts immediately (headless screenshots). The countdown state is a live 15s pre-start (boats sail); OCS is judged at the gun via `course.startLineSide`.
+- `main.ts` — scene/renderer, game state machine (menu/countdown/racing/finished), fixed-timestep loop, collisions, camera, right-of-way hails, mark pointer. `?auto=1` puts the player on autopilot; `?race=1` skips the menu and starts immediately (headless screenshots); `?touch=1` forces the touch UI on desktop. The countdown state is a live 15s pre-start (boats sail); OCS is judged at the gun via `course.startLineSide`. Mobile: touch hold-buttons (steer/sheet/spinnaker) live in `index.html`, wired up in main; haptics fire on penalty/OCS.
 - `boat.ts` — hull physics + rig. Force model: apparent wind gamma vs sheet
   gives angle of attack; flat-plate Cl/Cd; lift ⊥ apparent flow with sign
   disambiguated by the boom's leeward normal (this sign is easy to get wrong —
@@ -57,6 +60,11 @@ validation is done with headless sim harnesses + headless-Chrome screenshots.
   deep water?" must use `bedAt` — the old in-shader fract(sin()) fbm was
   removed for the bed because it can't be reproduced in JS (float32 GPU sin
   decorrelates the hash).
+- `wind.ts` — global wind field: slow direction/speed wander (race shifts) plus spatial gusts sampled per-position (cloth, wind lines). Direction is where the wind blows TOWARD.
+- `windlines.ts` — animated streaks skating downwind across the water; the primary visual read for wind direction. Built on `ribbons.ts`.
+- `hud.ts` — DOM HUD: speed, lap/pos/time, wind dial, trim gauge, minimap, OCS/penalty banners, toasts.
+- `hulls.ts` — procedural low-poly hulls; returns the group plus rig attachment points (mast base/top, jib tack, boom height). Boat local space: +Z bow, +Y up.
+- `util.ts` — clamp/lerp, dt-stable `damp`, `wrapAngle`/`angleDelta`, time/ordinal formatting.
 - `spray.ts` / `fish.ts` — bow-spray point pool and fish shadows.
 - `whitecaps.ts` — foam bursts on wave crests over deep water (probes
   `waveHeight` + `bedAt` around the camera, skips island shelves).
