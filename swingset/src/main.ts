@@ -90,6 +90,11 @@ ctx.tools = createTools(ctx);
 ctx.ui = createUi(ctx);
 ctx.audio = createAudio(ctx);
 
+// Dev-only handle so headless test drivers can read game state.
+if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+  (window as unknown as { __pots: GameCtx }).__pots = ctx;
+}
+
 // --- scoring ---------------------------------------------------------------
 
 function addPoints(n: number): void {

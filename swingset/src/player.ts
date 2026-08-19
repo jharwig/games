@@ -190,19 +190,26 @@ function buildRig(kind: CharacterKind, carryAnchor: THREE.Object3D): Rig {
   disposables.push(eyeMat);
   for (const ex of [-0.05, 0.05]) {
     const eye = new THREE.Mesh(eyeGeo, eyeMat);
-    eye.position.set(ex, 0.02, -HEAD_R * 0.92);
+    eye.position.set(ex, 0.02, -HEAD_R * 0.98);
     head.add(eye);
   }
 
-  // hair
-  const capGeo = new THREE.SphereGeometry(HEAD_R * 1.06, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.58);
+  // hair — tilted back so the rim sits on the forehead and covers the nape,
+  // leaving the face (and the eyes) clear.
+  const capGeo = new THREE.SphereGeometry(HEAD_R * 1.06, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.52);
   disposables.push(capGeo);
   const cap = new THREE.Mesh(capGeo, hair);
   cap.position.y = 0.012;
+  cap.rotation.x = 0.38;
   cap.castShadow = true;
   head.add(cap);
 
   if (kind === 'girl') {
+    const fringeGeo = new THREE.BoxGeometry(0.18, 0.045, 0.05);
+    disposables.push(fringeGeo);
+    const fringe = new THREE.Mesh(fringeGeo, hair);
+    fringe.position.set(0, 0.055, -HEAD_R * 0.85);
+    head.add(fringe);
     const tailGeo = new THREE.CapsuleGeometry(0.05, 0.18, 2, 6);
     disposables.push(tailGeo);
     const tail = new THREE.Mesh(tailGeo, hair);
@@ -563,7 +570,9 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     lookoutEmitted = false;
     atLookout = false;
     vel.set(0, 0, 0);
-    facing = Math.PI; // hug the trunk, back to the camera
+    // The kid clings to the camera-side face of the trunk, so facing the
+    // trunk (-Z) puts their back to the camera.
+    facing = 0;
   }
 
   function updateGround(dt: number, active: boolean): void {
@@ -662,6 +671,11 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   }
 
   // --- posing --------------------------------------------------------------
+  //
+  // Joint sign convention (model faces -Z): positive hip/shoulder rotation.x
+  // swings the limb FORWARD (toward -Z). A natural knee only flexes BACKWARD,
+  // so knee values must be <= 0; a natural elbow flexes forward, so elbow
+  // values are >= 0. Positive torso lean / head pitch tips BACKWARD.
 
   function poseSwinging(): void {
     const swing = ridingSwing!;
@@ -670,32 +684,34 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     // Legs kick out toward the water on the forward push, tuck on the backswing.
     const kick = clamp(av * 0.9 + a * 0.35, -1, 1);
     const extend = (kick + 1) * 0.5; // 0 = tucked, 1 = straight out front
-    const hip = lerp(-2.0, -1.15, extend); // thighs always forward off the seat
-    const knee = lerp(1.5, 0.15, extend);
+    const hip = lerp(0.6, 1.45, extend); // thighs always forward over the seat
+    const knee = lerp(-1.9, -0.2, extend); // shins tuck under, then swing out
     target.hipL = hip;
     target.hipR = hip + 0.06;
     target.kneeL = knee;
     target.kneeR = knee;
-    target.legSpread = 0.1;
-    // Hands up on the chains.
-    target.shoulderL = -2.5;
-    target.shoulderR = -2.5;
-    target.shoulderSpread = 0.16;
-    target.elbowL = 0.55 - extend * 0.3;
-    target.elbowR = 0.55 - extend * 0.3;
-    target.lean = -0.25 + kick * 0.35 + pumpKick * 0.25;
-    target.headPitch = -0.12 - kick * 0.12;
+    target.legSpread = 0.08;
+    // Hands up on the chains (they run from the seat edges, slightly outside
+    // the shoulders, up to the bar).
+    target.shoulderL = 2.75;
+    target.shoulderR = 2.75;
+    target.shoulderSpread = 0.3;
+    target.elbowL = 0.35;
+    target.elbowR = 0.35;
+    // Lean back on the forward kick, curl forward on the tuck.
+    target.lean = -0.05 + kick * 0.35 + pumpKick * 0.2;
+    target.headPitch = -0.05 - kick * 0.1;
   }
 
   function poseAirborne(): void {
     const rising = vel.y > 0;
-    target.hipL = rising ? -0.9 : -0.35;
-    target.hipR = rising ? -0.5 : -0.7;
-    target.kneeL = rising ? 1.2 : 0.5;
-    target.kneeR = rising ? 0.7 : 0.9;
+    target.hipL = rising ? 0.9 : 0.35;
+    target.hipR = rising ? 0.5 : 0.7;
+    target.kneeL = rising ? -1.2 : -0.5;
+    target.kneeR = rising ? -0.7 : -0.9;
     target.legSpread = 0.18;
-    target.shoulderL = -2.3;
-    target.shoulderR = -2.0;
+    target.shoulderL = 2.3;
+    target.shoulderR = 2.0;
     target.shoulderSpread = 0.5;
     target.elbowL = 0.5;
     target.elbowR = 0.7;
@@ -710,34 +726,42 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     const c = Math.cos(runPhase);
     const crouch = crouchTimer > 0 ? crouchTimer / 0.25 : 0;
     const stun = stunTimer > 0 ? 1 : 0;
-    target.hipL = s * 0.85 * amp - crouch * 0.55 - stun * 0.2;
-    target.hipR = -s * 0.85 * amp - crouch * 0.55 - stun * 0.2;
-    target.kneeL = (0.35 + Math.max(0, -c) * 0.9) * amp + crouch * 1.1 + stun * 0.5;
-    target.kneeR = (0.35 + Math.max(0, c) * 0.9) * amp + crouch * 1.1 + stun * 0.5;
+    // Hips scissor; each knee folds while its leg swings through (hip moving
+    // forward, cos > 0 for the left leg) and is straight during stance.
+    target.hipL = s * 0.85 * amp + crouch * 0.5 + stun * 0.2;
+    target.hipR = -s * 0.85 * amp + crouch * 0.5 + stun * 0.2;
+    target.kneeL = -(0.12 + Math.max(0, c) * 0.95) * amp - crouch * 1.0 - stun * 0.5;
+    target.kneeR = -(0.12 + Math.max(0, -c) * 0.95) * amp - crouch * 1.0 - stun * 0.5;
     target.legSpread = 0.07;
     target.shoulderL = -s * 0.7 * amp - stun * 0.4;
     target.shoulderR = s * 0.7 * amp - stun * 0.4;
     target.shoulderSpread = 0.12 + amp * 0.05;
     target.elbowL = 0.45 + amp * 0.5;
     target.elbowR = 0.45 + amp * 0.5;
+    if (ctx.tools?.held) {
+      // Carry arm: hold the Tool up in front instead of pumping it.
+      target.shoulderR = 0.55;
+      target.elbowR = 1.0;
+    }
     target.lean = -amp * 0.18 - crouch * 0.25 + stun * 0.3;
     target.headPitch = -amp * 0.05;
   }
 
   function poseClimbing(): void {
     const s = Math.sin(climbPhase);
-    target.hipL = -0.8 + s * 0.4;
-    target.hipR = -0.8 - s * 0.4;
-    target.kneeL = 1.3 - s * 0.4;
-    target.kneeR = 1.3 + s * 0.4;
-    target.legSpread = 0.45;
-    target.shoulderL = -2.7 - s * 0.3;
-    target.shoulderR = -2.7 + s * 0.3;
+    // Knees lift toward the trunk, heels tucked; arms reach up hand over hand.
+    target.hipL = 0.9 + s * 0.35;
+    target.hipR = 0.9 - s * 0.35;
+    target.kneeL = -1.5 + s * 0.3;
+    target.kneeR = -1.5 - s * 0.3;
+    target.legSpread = 0.3;
+    target.shoulderL = 2.6 + s * 0.25;
+    target.shoulderR = 2.6 - s * 0.25;
     target.shoulderSpread = 0.35;
-    target.elbowL = 0.9;
-    target.elbowR = 0.9;
-    target.lean = 0.1;
-    target.headPitch = atLookout ? -0.2 : 0.05;
+    target.elbowL = 0.5;
+    target.elbowR = 0.5;
+    target.lean = -0.15;
+    target.headPitch = atLookout ? -0.1 : 0.3;
   }
 
   function applyPose(dt: number): void {
