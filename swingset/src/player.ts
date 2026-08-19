@@ -308,6 +308,51 @@ function freshPose(): Pose {
 }
 
 // ---------------------------------------------------------------------------
+// Throw overlay — the projectile leaves the hand on the button press, so there
+// is nothing to wind up: the animation starts AT the release frame and plays
+// the whip over the top plus the follow-through. Keyed in continuous radians
+// on the right shoulder (see the sign convention above applyPose's callers):
+// -3.0 ~ overhead and a touch behind, -4.7 ~ straight out front, -5.9 ~ down
+// across the body. It is applied after applyPose()'s damping so it stays
+// snappy, and its blend weight fades to 0 to hand control back smoothly.
+
+const THROW_TIME = 0.42;
+
+interface ThrowKey {
+  t: number;
+  shoulder: number;
+  elbow: number;
+  lean: number;
+}
+
+const THROW_KEYS: ThrowKey[] = [
+  { t: 0.0, shoulder: -3.0, elbow: 0.95, lean: 0.12 },
+  { t: 0.1, shoulder: -4.7, elbow: 0.15, lean: -0.28 },
+  { t: 0.22, shoulder: -5.5, elbow: 0.35, lean: -0.34 },
+  { t: THROW_TIME, shoulder: -5.9, elbow: 0.6, lean: -0.1 },
+];
+
+/** Ease in over 3 frames so the arm snaps without popping, out over the tail. */
+function throwWeight(t: number): number {
+  const rise = clamp(t / 0.05, 0, 1);
+  const fall = clamp((THROW_TIME - t) / (THROW_TIME - 0.28), 0, 1);
+  const w = Math.min(rise, fall * fall * (3 - 2 * fall));
+  return clamp(w, 0, 1);
+}
+
+function sampleThrow(t: number, out: ThrowKey): void {
+  let i = 0;
+  while (i < THROW_KEYS.length - 2 && t > THROW_KEYS[i + 1].t) i++;
+  const a = THROW_KEYS[i];
+  const b = THROW_KEYS[i + 1];
+  const k = clamp((t - a.t) / (b.t - a.t), 0, 1);
+  out.t = t;
+  out.shoulder = lerp(a.shoulder, b.shoulder, k);
+  out.elbow = lerp(a.elbow, b.elbow, k);
+  out.lean = lerp(a.lean, b.lean, k);
+}
+
+// ---------------------------------------------------------------------------
 
 export function createPlayer(ctx: GameCtx): PlayerApi {
   const carryAnchor = new THREE.Object3D();
@@ -348,6 +393,14 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
 
   const pose = freshPose();
   const target = freshPose();
+
+  // Throw overlay: seconds since the release, or -1 when idle.
+  let throwTimer = -1;
+  const throwKey: ThrowKey = { t: 0, shoulder: 0, elbow: 0, lean: 0 };
+  // Any throw restarts the overlay from the release frame.
+  ctx.events.on('itemThrown', () => {
+    throwTimer = 0;
+  });
 
   // camera rig state
   const camPos = new THREE.Vector3(0, 3, 12);
@@ -405,6 +458,7 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     climbingTree = null;
     atLookout = false;
     lookoutEmitted = false;
+    throwTimer = -1;
     if (swing) {
       mount(swing);
       swing.seatWorldPos(tmpSeat);
@@ -738,8 +792,9 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     target.shoulderSpread = 0.12 + amp * 0.05;
     target.elbowL = 0.45 + amp * 0.5;
     target.elbowR = 0.45 + amp * 0.5;
-    if (ctx.tools?.held) {
-      // Carry arm: hold the Tool up in front instead of pumping it.
+    if (ctx.tools?.heldInHand) {
+      // Carry arm: hold the Tool up in front instead of pumping it. Skipped
+      // while the Hammer is out on its boomerang flight — the hand is empty.
       target.shoulderR = 0.55;
       target.elbowR = 1.0;
     }
@@ -789,6 +844,29 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     rig.armR.lower.rotation.x = pose.elbowR;
     rig.torso.rotation.x = pose.lean;
     rig.head.rotation.x = pose.headPitch - pose.lean;
+
+    applyThrowOverlay(dt);
+  }
+
+  /** Whip + follow-through laid straight over the damped pose (no damping). */
+  function applyThrowOverlay(dt: number): void {
+    if (throwTimer < 0) return;
+    throwTimer += dt;
+    if (throwTimer >= THROW_TIME) {
+      throwTimer = -1;
+      return;
+    }
+    sampleThrow(throwTimer, throwKey);
+    const w = throwWeight(throwTimer);
+
+    rig.armR.upper.rotation.x = lerp(pose.shoulderR, throwKey.shoulder, w);
+    rig.armR.upper.rotation.z = lerp(pose.shoulderSpread, 0.42, w);
+    rig.armR.lower.rotation.x = lerp(pose.elbowR, throwKey.elbow, w);
+    // The off arm swings back as a counterweight.
+    rig.armL.upper.rotation.x = lerp(pose.shoulderL, -0.5, w * 0.6);
+    const lean = lerp(pose.lean, throwKey.lean, w);
+    rig.torso.rotation.x = lean;
+    rig.head.rotation.x = pose.headPitch - lean;
   }
 
   function syncRigTransform(): void {

@@ -281,6 +281,9 @@ export interface ShipApi {
  *  chainsaw felling, wrench jamming, magnet catching. */
 export interface ToolsApi {
   readonly held: HeldKind | null;
+  /** False while the held item is away — the Boomerang Hammer mid-flight is
+   *  still `held`, but the hand is empty, so the carry pose must let go. */
+  readonly heldInHand: boolean;
   /** Throw/use input: returns true if the press did something. */
   useHeld(): boolean;
   /** Re-scatter pickups for a new Run. */

@@ -198,8 +198,12 @@ function poseInHand(kind: HeldKind, mesh: THREE.Object3D): void {
   mesh.scale.setScalar(1);
   switch (kind) {
     case 'hammer':
-      mesh.position.set(0, 0.28, 0);
-      mesh.rotation.z = -0.35;
+      // Shouldered like an axe: the grip in the hand, the head tipped back and
+      // out over the right shoulder. The carry arm (poseGround: shoulder 0.55,
+      // elbow 1.0) points the hand's +Y backward, so rotation.x lifts the
+      // handle up from there and rotation.z splays it clear of the head.
+      mesh.position.set(0.04, 0.24, -0.1);
+      mesh.rotation.set(-0.8, 0, -0.55);
       break;
     case 'wrench':
       mesh.position.set(0, 0.25, 0);
@@ -807,6 +811,9 @@ export function createTools(ctx: GameCtx): ToolsApi {
   return {
     get held(): HeldKind | null {
       return held;
+    },
+    get heldInHand(): boolean {
+      return held !== null && heldMesh !== null && heldMesh.visible;
     },
     useHeld,
     reset,
