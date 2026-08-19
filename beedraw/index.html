@@ -321,7 +321,7 @@ function genLevel(level) {
   // last resort: play the cheapest layout we saw, with just enough ink to seal
   if (fallback) {
     L = fallback;
-    L.ink = Math.round(Math.max(ENC_COST * 0.58, fallback.seal * 1.12));
+    L.ink = Math.round(Math.min(TIGHT_RING * 0.96, Math.max(ENC_COST * 0.58, fallback.seal * 1.12)));
     L.ok = true;
   }
   return L;
@@ -344,57 +344,99 @@ function gapCount(n) {
 var ENC_COST = 2 * Math.PI * (ANIM_NODRAW + 34);   // ring at animal + bee + margin
 var TIGHT_RING = 2 * Math.PI * (ANIM_NODRAW + 2);  // the cheapest ring that is legal at all
 
-// is this point in the mouth of a fence gap? (a gap is not a wall - the bees
-// come straight through it, so it can never anchor the line)
-function gapMouth(L, x, y) {
-  var i, q;
-  for (i = 0; i < L.gaps.length; i++) {
-    q = L.gaps[i];
-    if (q.side === 0 && y < FY0 + 14 && x >= q.a - 8 && x <= q.b + 8) return true;
-    if (q.side === 1 && y > FY1 - 14 && x >= q.a - 8 && x <= q.b + 8) return true;
-    if (q.side === 2 && x < FX0 + 14 && y >= q.a - 8 && y <= q.b + 8) return true;
-    if (q.side === 3 && x > FX1 - 14 && y >= q.a - 8 && y <= q.b + 8) return true;
+// ---- solvability check -------------------------------------------------
+// The guard does not guess: it builds the same grid the bees walk on, draws a
+// candidate line into it and asks whether any gap can still reach the animal.
+
+function gridFor(Lv) {
+  var arr = new Uint8Array(GW * GH), gx, gy;
+  for (gy = 0; gy < GH; gy++) {
+    for (gx = 0; gx < GW; gx++) {
+      var x = gx * CELL + CELL / 2, y = gy * CELL + CELL / 2;
+      arr[gy * GW + gx] = (!inField(x, y, 8) || pointInRock(Lv, x, y, 6)) ? 1 : 0;
+    }
   }
-  return false;
+  return arr;
 }
 
-// upper bound on the cheapest anchored seal: for a family of rings around the
-// animal, add up only the parts that the player really has to draw (the parts
-// that no fence and no rock already blocks)
-function ringSealCost(L) {
-  var best = INF, r, i;
-  for (r = ANIM_NODRAW + 4; r <= ANIM_NODRAW + 90; r += 8) {
-    var N = 180, stepLen = 2 * Math.PI * r / N;
-    var cost = 0, pieces = 0, prevFree = false, holed = false;
-    for (i = 0; i < N; i++) {
-      var a = i / N * Math.PI * 2;
-      var x = L.ax + Math.cos(a) * r, y = L.ay + Math.sin(a) * r;
-      if (inField(x, y, 12)) {
-        // a pond blocks the pen but not the bees, so a ring across water leaks
-        if (pointInPond(L, x, y, 0)) { holed = true; break; }
-        if (pointInRock(L, x, y, 6)) { prevFree = false; continue; }
-        cost += stepLen;
-        if (!prevFree) pieces++;
-        prevFree = true;
-      } else {
-        // too close to the fence to draw: a solid rail seals it, a gap leaks
-        if (gapMouth(L, x, y)) { holed = true; break; }
-        prevFree = false;
+function stampInto(arr, x, y, rad) {
+  var g0 = clamp(((x - rad) / CELL) | 0, 0, GW - 1), g1 = clamp(((x + rad) / CELL) | 0, 0, GW - 1);
+  var h0 = clamp(((y - rad) / CELL) | 0, 0, GH - 1), h1 = clamp(((y + rad) / CELL) | 0, 0, GH - 1);
+  for (var gy = h0; gy <= h1; gy++) {
+    for (var gx = g0; gx <= g1; gx++) {
+      var cx = gx * CELL + CELL / 2, cy = gy * CELL + CELL / 2;
+      if (dist2(cx, cy, x, y) <= rad * rad) arr[gy * GW + gx] = 1;
+    }
+  }
+}
+
+// can any bee still walk from a gap to the animal?
+function sealedFor(arr, Lv) {
+  var seen = new Uint8Array(GW * GH);
+  var q = new Int32Array(GW * GH), qh = 0, qt = 0, i;
+  var sx = clamp((Lv.ax / CELL) | 0, 0, GW - 1), sy = clamp((Lv.ay / CELL) | 0, 0, GH - 1);
+  seen[sy * GW + sx] = 1; q[qt++] = sy * GW + sx;
+  for (i = 0; i < NB.length; i++) {
+    var nx = sx + NB[i][0], ny = sy + NB[i][1];
+    if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
+    var ni = ny * GW + nx;
+    if (arr[ni] || seen[ni]) continue;
+    seen[ni] = 1; q[qt++] = ni;
+  }
+  while (qh < qt) {
+    var ci = q[qh++], cx = ci % GW, cy = (ci / GW) | 0;
+    for (i = 0; i < NB.length; i++) {
+      var ax = cx + NB[i][0], ay = cy + NB[i][1];
+      if (ax < 0 || ay < 0 || ax >= GW || ay >= GH) continue;
+      var ai = ay * GW + ax;
+      if (arr[ai] || seen[ai]) continue;
+      if (NB[i][0] && NB[i][1] && arr[cy * GW + ax] && arr[ay * GW + cx]) continue;
+      seen[ai] = 1; q[qt++] = ai;
+    }
+  }
+  // every free cell in the mouth of a gap is a place a bee can appear
+  for (i = 0; i < Lv.gaps.length; i++) {
+    var q = Lv.gaps[i], v, u, mx, my;
+    for (v = q.a - 6; v <= q.b + 6; v += CELL / 2) {
+      for (u = 10; u <= 40; u += CELL / 2) {
+        if (q.side === 0) { mx = v; my = FY0 + u; }
+        else if (q.side === 1) { mx = v; my = FY1 - u; }
+        else if (q.side === 2) { mx = FX0 + u; my = v; }
+        else { mx = FX1 - u; my = v; }
+        var mi = clamp((my / CELL) | 0, 0, GH - 1) * GW + clamp((mx / CELL) | 0, 0, GW - 1);
+        if (seen[mi]) return false;
       }
     }
-    if (holed) continue;
-    if (cost < 1) return 0;               // already walled in - level is trivial
-    cost += 26 * Math.max(0, pieces - 1); // detours between the anchor points
+  }
+  return true;
+}
+
+// The cheapest verified seal: try rings of growing radius, draw only the parts
+// the player is allowed to draw (not on the fence, not on a rock, not on the
+// water) and keep the cheapest one that really shuts the bees out.
+function ringSealCost(Lv) {
+  var best = INF, r, i;
+  if (sealedFor(gridFor(Lv), Lv)) return 0;       // walled in already: no game
+  for (r = ANIM_NODRAW + 4; r <= ANIM_NODRAW + 96; r += 8) {
+    var arr = gridFor(Lv);
+    var N = 200, stepLen = 2 * Math.PI * r / N;
+    var cost = 0, pieces = 0, prevFree = false;
+    for (i = 0; i < N; i++) {
+      var a = i / N * Math.PI * 2;
+      var x = Lv.ax + Math.cos(a) * r, y = Lv.ay + Math.sin(a) * r;
+      if (!inField(x, y, 12) || pointInRock(Lv, x, y, 4) || pointInPond(Lv, x, y, 0)) {
+        prevFree = false; continue;               // cannot draw here
+      }
+      stampInto(arr, x, y, INK_HALF + CELL);
+      cost += stepLen;
+      if (!prevFree) pieces++;
+      prevFree = true;
+    }
+    if (!sealedFor(arr, Lv)) continue;            // this ring still leaks
+    cost += 26 * Math.max(0, pieces - 1);         // detours between the anchors
     if (cost < best) best = cost;
   }
   return best;
-}
-
-// the other cheap solution: a straight cut across the mouth of every gap
-function gapSealCost(L) {
-  var sum = 0;
-  for (var i = 0; i < L.gaps.length; i++) sum += (L.gaps[i].b - L.gaps[i].a) + 26;
-  return sum;
 }
 
 function tryGen(level, seed, attempt) {
@@ -409,6 +451,8 @@ function tryGen(level, seed, attempt) {
   // ---- where the animal stands ----
   // from level 3 it hugs a wall or a corner, so the fence can carry part of
   // the seal - a free-standing animal would need a full (unaffordable) ring
+  // where the animal stands: a corner or a wall gives the line something to
+  // hold on to, a rock nook makes the player work for it
   var mode = n <= 2 ? "open" : (r() < 0.55 ? "corner" : (r() < 0.78 ? "wall" : "rocks"));
   L.wallSides = {};
   if (mode === "corner") {
@@ -569,10 +613,30 @@ function tryGen(level, seed, attempt) {
   // ---- the animal must stand on clear ground ----
   if (pointInPond(L, L.ax, L.ay, 50) || pointInRock(L, L.ax, L.ay, 44)) return fail(L);
 
+  // ---- the bees must be a real threat: an empty field has to be a loss ----
+  var arr0 = gridFor(L);
+  var dA = distField(arr0, L.ax, L.ay);
+  var dH = L.honey ? distField(arr0, L.honey.x, L.honey.y) : null;
+  var honeyCell = L.honey ? cellOf(L.honey.x, L.honey.y) : 0;
+  var soonest = INF;
+  for (i = 0; i < L.gaps.length; i++) {
+    var gin = gapInner(L.gaps[i]);
+    var gc = cellOf(gin.x, gin.y);
+    if (dA[gc] >= INF) continue;
+    var travel;
+    if (dH && dH[gc] < INF && dA[honeyCell] < INF) {
+      travel = (dH[gc] + dA[honeyCell]) * CELL * 1.2 / 78 + HONEY_DWELL;
+    } else {
+      travel = dA[gc] * CELL * 1.2 / 78;
+    }
+    if (travel < soonest) soonest = travel;
+  }
+  if (soonest + 0.8 > L.time) return fail(L);   // the bees could never make it
+
   // ---- ink budget ----
   var ringCost = ringSealCost(L);
-  if (ringCost === 0) return fail(L);          // walled in already: no game
-  var seal = Math.min(ringCost, gapSealCost(L));
+  if (ringCost === 0 || ringCost === INF) { L.seal = INF; return fail(L); }
+  var seal = ringCost;
   L.seal = seal;
   if (n <= 2) {
     // tutorial levels: enough ink to simply loop around the animal
@@ -736,8 +800,10 @@ function stampCircle(x, y, rad) {
 
 var NB = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 
-// BFS flow field outward from a target cell
-function makeFlow(tx, ty) {
+function makeFlow(tx, ty) { return distField(blocked, tx, ty); }
+
+// BFS distance field outward from a target cell
+function distField(grid, tx, ty) {
   var d = new Int32Array(GW * GH);
   var i;
   for (i = 0; i < d.length; i++) d[i] = INF;
@@ -750,7 +816,7 @@ function makeFlow(tx, ty) {
     var nx = sx + NB[i][0], ny = sy + NB[i][1];
     if (nx < 0 || ny < 0 || nx >= GW || ny >= GH) continue;
     var ni = ny * GW + nx;
-    if (blocked[ni] || d[ni] === 0) continue;
+    if (grid[ni] || d[ni] === 0) continue;
     d[ni] = 0; q[qt++] = ni;
   }
   while (qh < qt) {
@@ -760,9 +826,9 @@ function makeFlow(tx, ty) {
       var ax = cx + NB[i][0], ay = cy + NB[i][1];
       if (ax < 0 || ay < 0 || ax >= GW || ay >= GH) continue;
       var ai = ay * GW + ax;
-      if (blocked[ai] || d[ai] !== INF) continue;
+      if (grid[ai] || d[ai] !== INF) continue;
       if (NB[i][0] && NB[i][1]) {                 // no corner cutting
-        if (blocked[cy * GW + ax] && blocked[ay * GW + cx]) continue;
+        if (grid[cy * GW + ax] && grid[ay * GW + cx]) continue;
       }
       d[ai] = cd + 1;
       q[qt++] = ai;
@@ -963,16 +1029,16 @@ function stepBees(dt) {
       var dx = t.x - b.x, dy = t.y - b.y;
       var d = Math.sqrt(dx * dx + dy * dy);
       if (d < 8) { b.mode = (L.honey && flowH) ? "honey" : "animal"; continue; }
-      b.x += dx / d * speed * dt;
-      b.y += dy / d * speed * dt;
+      var sx2 = dx / d * speed * dt, sy2 = dy / d * speed * dt;
+      if (!inField(b.x, b.y, 8)) { b.x += sx2; b.y += sy2; }   // still outside
+      else moveBee(b, sx2, sy2);                               // ink can stop it
       b.face = dx < 0 ? -1 : 1;
       continue;
     }
 
     if (b.mode === "drink") {
       b.dwell -= dt;
-      b.x += Math.sin(b.wob * 2) * 8 * dt;
-      b.y += Math.cos(b.wob * 2.4) * 10 * dt;
+      moveBee(b, Math.sin(b.wob * 2) * 8 * dt, Math.cos(b.wob * 2.4) * 10 * dt);
       if (b.dwell <= 0) b.mode = "animal";
       continue;
     }
@@ -1017,9 +1083,10 @@ function moveBee(b, sx, sy) {
   if (!cellBlockedAt(nx, ny)) { b.x = nx; b.y = ny; return; }
   if (!cellBlockedAt(nx, b.y)) { b.x = nx; return; }
   if (!cellBlockedAt(b.x, ny)) { b.y = ny; return; }
-  // fully stuck - shove sideways a touch so bees do not pile up
-  b.x = clamp(b.x + (Math.random() - 0.5) * 2, FX0 + 12, FX1 - 12);
-  b.y = clamp(b.y + (Math.random() - 0.5) * 2, FY0 + 12, FY1 - 12);
+  // fully stuck - nudge sideways so the bees do not pile up, but never let
+  // the nudge push one through the line
+  var jx = b.x + (Math.random() - 0.5) * 2, jy = b.y + (Math.random() - 0.5) * 2;
+  if (!cellBlockedAt(jx, jy)) { b.x = jx; b.y = jy; }
 }
 
 // =========================================================================
