@@ -22,12 +22,12 @@ with it. Gameplay is the designer's: ask before changing game design.
 - `main.ts` — composition root and ALL game rules: hit resolution, hearts ↔
   tree sync, round/run flow, scoring, screen transitions, fixed-timestep
   loop. Modules detect and emit events; main applies consequences.
-- `world.ts` — terrain/water/sky, the four swingsets (owns swing pendulum
-  integration; `pump()` is the only outside input), trees with their
-  alive/fallen/stump lifecycle.
+- `world.ts` — the four themed islands (terrain/water/sky), their swingsets
+  (owns swing pendulum integration; `pump()` is the only outside input),
+  trees with their alive/fallen/stump lifecycle, zip-line landing posts.
 - `player.ts` — character (boy/girl), movement state machine (swinging /
-  airborne / ground / climbing), and the camera rig (it owns the camera
-  every frame).
+  airborne / ground / climbing / zipline, with the zip's cinematic cuts),
+  and the camera rig (it owns the camera every frame).
 - `ship.ts` — pirate ship model/scaling, telegraphed firing, cannonball
   ballistics + collision detection (emits `cannonImpact`; never applies
   rules), sinking, trek repositioning.
@@ -36,6 +36,9 @@ with it. Gameplay is the designer's: ask before changing game design.
 - `ui.ts` — all DOM under `#ui`: screens, HUD, touch controls, mute.
 - `audio.ts` — WebAudio sea shanty + event-driven sfx. No audio assets.
 
-Conventions: Y-up, meters; water at z < 0, playground z > 0; swings arc
-along Z toward the water; camera behind the player on +Z. Positive swing
-angle = seat toward the water.
+Conventions: Y-up, meters; four islands ring the archipelago centre, open
+water everywhere the land dips below WATER_Y, the Ship near the centre.
+Each island's swingset group is yawed (`setYaw`) so its local -Z faces the
+centre; player movement and camera work in that island frame (`towardCenter`).
+Positive swing angle = seat toward the Ship. Island 0 keeps the historical
+axes (-Z toward the water, camera on +Z).

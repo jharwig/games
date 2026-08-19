@@ -2,7 +2,8 @@
 
 Glossary for Pirates of the Swingset, designed by Genevieve: a player swings
 on a swingset while a pirate ship in the water ahead fires cannonballs at the
-swings.
+swings. The four Swingsets stand on themed Islands ringing the Ship's water,
+connected by Zip Lines.
 
 ## Language
 
@@ -29,14 +30,19 @@ down dead.
 _Avoid_: lives, HP
 
 **Playground**:
-The whole world of the game: four Swingsets scattered far apart, with Trees,
-all beside the water where the Ship sails.
+The whole world of the game: four Islands in a ring around the water where
+the Ship sails, each carrying a Swingset and its Trees.
 _Avoid_: world, map, level
 
+**Island**:
+One of the four small islands of the Playground. Each has its own colours —
+Jungle, Autumn, Snow, Volcanic — so it can be told apart even as a silhouette
+in the fog. Islands connect only by Zip Lines.
+
 **Swingset**:
-A frame holding four Swings. There are multiple Swingsets in the Playground,
-far apart from each other; the player plays at one Swingset at a time and the
-camera stays zoomed in on it.
+A frame holding four Swings. Each Island carries one Swingset, facing the
+Ship's water; the player plays at one Swingset at a time and the camera
+stays zoomed in on it.
 
 **Swing**:
 One seat on a Swingset. A Swing can be Broken by a cannonball hit.
@@ -53,14 +59,22 @@ Play after all four Swingsets are Broken: the player fights on foot, dodging
 blasts and throwing Tools, until the Hearts run out.
 
 **Trek**:
-The on-foot journey from a wrecked Swingset to the next one. During a Trek
-the Ship repositions along the shore, firing only occasional slow shots.
+The journey from a wrecked Swingset to another one — a Zip Line ride between
+Islands. During a Trek the Ship repositions, firing only occasional slow
+shots.
 
 **Lookout**:
-Climbing a Tree to zoom the view out and spot the next Swingset or nearby
-Tool pickups. Only one other Swingset is ever visible from a Lookout. The
-player can also wander the Playground on foot without a Lookout, but risks
-getting lost.
+Climbing a Tree to zoom the view out, survey the ring of Islands, and grab a
+Zip Line. From the ground the neighbour Islands are only faint silhouettes in
+the fog; the fog opens at a Lookout. Tool pickups sometimes wait at the top.
+
+**Zip Line**:
+A cable from a Lookout treetop down to a landing post on either neighbouring
+Island. Press left or right at the treetop to ride toward that side. The ride
+is locked on — it always delivers — but the Ship keeps firing, and a mid-ride
+hit costs a Heart (a Tree falls on the destination Island). The camera plays
+the ride as a short cinematic cut sequence. Zipping is allowed any time, not
+just after a wreck — abandoning a live Swingset for fresh Trees is a choice.
 
 **Pump**:
 The one-button swinging input; each press drives the Swing higher.

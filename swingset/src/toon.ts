@@ -205,27 +205,6 @@ export function seaSplotchTexture(): THREE.CanvasTexture {
   });
 }
 
-/** Shoreline foam: white scallops fading upward, transparent elsewhere. */
-export function shoreFoamTexture(): THREE.CanvasTexture {
-  return canvasTexture(256, 64, (c) => {
-    c.clearRect(0, 0, 256, 64);
-    c.fillStyle = 'rgba(255,255,255,0.95)';
-    for (let x = 0; x < 256; x += 32) {
-      c.beginPath();
-      c.ellipse(x + 16, 54, 20, 13, 0, Math.PI, Math.PI * 2);
-      c.fill();
-    }
-    c.fillRect(0, 54, 256, 10);
-    // faint second rank of scallops above
-    c.fillStyle = 'rgba(255,255,255,0.4)';
-    for (let x = 0; x < 256; x += 32) {
-      c.beginPath();
-      c.ellipse(x, 44, 14, 9, 0, Math.PI, Math.PI * 2);
-      c.fill();
-    }
-  });
-}
-
 /** Vertical sky gradient for the dome: bright cyan down to pale horizon. */
 export function skyTexture(): THREE.CanvasTexture {
   const tex = canvasTexture(4, 256, (c) => {

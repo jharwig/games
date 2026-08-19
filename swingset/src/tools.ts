@@ -409,10 +409,20 @@ export function createTools(ctx: GameCtx): ToolsApi {
       : SWINGSET_POSITIONS.map((s) => ({ x: s.x, z: s.z }));
 
     function placeNear(cx: number, cz: number, kind: ToolKind, minR: number, maxR: number): void {
-      const a = Math.random() * Math.PI * 2;
-      const r = minR + Math.random() * (maxR - minR);
-      const x = cx + Math.cos(a) * r;
-      const z = Math.max(4, cz + Math.sin(a) * r);
+      // Islands are surrounded by sea: resample until the spot is on grass.
+      let x = cx;
+      let z = cz + minR;
+      for (let tries = 0; tries < 12; tries++) {
+        const a = Math.random() * Math.PI * 2;
+        const r = minR + Math.random() * (maxR - minR);
+        const tx = cx + Math.cos(a) * r;
+        const tz = cz + Math.sin(a) * r;
+        if (ctx.world.groundHeightAt(tx, tz) > 0.5) {
+          x = tx;
+          z = tz;
+          break;
+        }
+      }
       addPickup(kind, x, groundY(x, z), z, null);
     }
 
@@ -423,20 +433,10 @@ export function createTools(ctx: GameCtx): ToolsApi {
     const extraStart = 1 + Math.floor(Math.random() * 2); // 2–3 total
     for (let i = 0; i < extraStart; i++) placeNear(start.x, start.z, nextKind(), 6, 12);
 
-    // 1–2 near each other Swingset.
+    // 1–2 near each other island's Swingset.
     for (let i = 1; i < sets.length; i++) {
       const n = 1 + Math.floor(Math.random() * 2);
       for (let k = 0; k < n; k++) placeNear(sets[i].x, sets[i].z, nextKind(), 5, 12);
-    }
-
-    // A couple along the shore path between adjacent Swingsets.
-    const byX = sets.slice().sort((a, b) => a.x - b.x);
-    for (let i = 0; i + 1 < byX.length; i++) {
-      for (const t of [0.34, 0.68]) {
-        const x = byX[i].x + (byX[i + 1].x - byX[i].x) * t + (Math.random() - 0.5) * 8;
-        const z = 8 + Math.random() * 8;
-        addPickup(nextKind(), x, groundY(x, z), z, null);
-      }
     }
 
     // 1–2 up a Tree — grabbed while climbing to a Lookout.
@@ -612,13 +612,12 @@ export function createTools(ctx: GameCtx): ToolsApi {
   }
 
   function surfaceYAt(x: number, z: number): number {
-    if (z < 0) return WATER_Y;
     const h = ctx.world.groundHeightAt(x, z);
-    return Number.isFinite(h) ? h : 0;
+    return Math.max(Number.isFinite(h) ? h : 0, WATER_Y);
   }
 
   function splashAtSurface(p: Projectile, at: THREE.Vector3): void {
-    const water = at.z < 0;
+    const water = ctx.world.groundHeightAt(at.x, at.z) < WATER_Y;
     spawnSplash(at, water ? 0xbfe6ff : 0xd8c9a8, p.kind === 'log' ? 1.6 : 1.0);
   }
 

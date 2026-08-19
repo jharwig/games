@@ -1,34 +1,48 @@
-// world.ts — the Playground: terrain, water, sky, Swingsets and Trees.
-// Owns swing pendulum integration and tree fall / regrow animation.
+// world.ts — the Playground: an archipelago of four themed Islands around
+// the Ship's water, plus terrain, sea, sky, Swingsets, Trees and the
+// zip-line landing posts. Owns swing pendulum integration and tree
+// fall / regrow animation.
 //
-// Conventions (see types.ts): Y-up, water fills z < 0 at WATER_Y, the shore
-// runs along X, the Playground is on z > 0 and a Swing moving toward the
-// water moves toward -Z. A swing pivot rotated by +angle about X sends its
-// seat to -Z, so `pivot.rotation.x = angle` matches the contract directly.
+// Conventions (see types.ts): Y-up, open water at WATER_Y everywhere the
+// land dips below it. Each island's Swingset group is yawed by setYaw() so
+// its local -Z faces the centre; a swing pivot rotated by +angle about X
+// sends its seat toward the Ship, so `pivot.rotation.x = angle` still
+// matches the contract directly.
 
 import * as THREE from 'three';
 import {
+  ARCHIPELAGO_CENTER,
   type GameCtx,
+  ISLAND_FLAT_R,
+  ISLAND_SEA_R,
+  ISLAND_THEMES,
+  ISLAND_TOP,
+  SEABED_Y,
+  SHIP_ORBIT,
   STUMP_REGROW_SECONDS,
   SWINGS_PER_SET,
   SWINGSET_POSITIONS,
   SWING_BAR_HEIGHT,
   SWING_MAX_ANGLE,
   SWING_ROPE_LENGTH,
+  setYaw,
   type SwingInfo,
   type SwingsetInfo,
   TREES_PER_SET,
   type TreeInfo,
   WATER_Y,
   type WorldApi,
+  ZIP_POST_R,
+  ringNeighbors,
+  towardCenter,
 } from './types';
 import { clamp, damp } from './util';
 import {
+  canvasTexture,
   grassPatchTexture,
   inkWeight,
   noOutline,
   seaSplotchTexture,
-  shoreFoamTexture,
   skyTexture,
   toonMat,
   woodGrainTexture,
@@ -43,30 +57,21 @@ const PUMP_GAIN = 0.55;
 const BAR_SPAN = 7; // metres of top bar along X
 const SEAT_OFFSETS = [-2.55, -0.85, 0.85, 2.55]; // SWINGS_PER_SET along the bar
 
-const BEACH_END = 2.4; // land reaches y = 0 here; sand fades to grass by ~10
-const BEACH_SLOPE = 0.12;
-const WATER_EDGE_Z = 1.6; // water plane stops just short of dry sand
-const HILL_START = 55; // everything nearer than this is dead flat
-const HILL_FULL = 100;
-const HILL_AMP = 1.6;
-
-const TERRAIN_X0 = -260;
-const TERRAIN_X1 = 380;
-const TERRAIN_Z0 = -10;
-const TERRAIN_Z1 = 250;
+// Terrain covers the whole ring of islands (plus shore margin).
+const TERRAIN_HALF = 130;
 const TERRAIN_SEG = 4; // metres per quad
 
 const FALL_SECONDS = 1;
 const STAND_SECONDS = 0.7;
-const ANCHORAGE_Z = -28;
 
 const WORN_W = 9.6; // worn grass/dirt patch under a swingset's seat row
 const WORN_D = 4.8;
 
-const TUFTS_PER_SET = 1700; // grass tufts clustered around each swingset
-const TUFT_SET_RADIUS = 26;
-const TUFTS_BAND = 2600; // sparse fill across the trek band between sets
-const GRASS_MIN_Z = 10; // no tufts on the sand strip
+const TUFTS_PER_SET = 2200; // grass tufts clustered on each island
+const TUFT_SET_RADIUS = 24;
+const GRASS_MIN_H = 0.5; // no tufts on the sand ring / underwater
+
+const ZIP_POST_H = 2.5; // cable anchor height on a landing post
 
 // --- scratch (no per-frame allocation) -------------------------------------
 
@@ -93,7 +98,7 @@ function smoothstep(a: number, b: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Cheap deterministic rolling hills, only used far from the gameplay area. */
+/** Cheap deterministic value noise — used only to vary terrain colour. */
 function hillNoise(x: number, z: number): number {
   return (
     Math.sin(x * 0.037 + 1.3) * Math.cos(z * 0.041 - 0.7) +
@@ -101,24 +106,44 @@ function hillNoise(x: number, z: number): number {
   );
 }
 
-/** The exact surface used to build the terrain mesh (land, may go negative). */
+/** The exact surface used to build the terrain mesh: each island is a flat
+ *  plateau whose beach slopes under the sea; between islands lies seabed. */
 function landHeight(x: number, z: number): number {
-  if (z < BEACH_END) return Math.max(-2.2, (z - BEACH_END) * BEACH_SLOPE);
-  const mask = smoothstep(HILL_START, HILL_FULL, z);
-  if (mask <= 0) return 0;
-  return hillNoise(x, z) * HILL_AMP * mask;
+  let h = SEABED_Y;
+  for (const s of SWINGSET_POSITIONS) {
+    const d = Math.hypot(x - s.x, z - s.z);
+    const ih = ISLAND_TOP - (ISLAND_TOP - SEABED_Y) * smoothstep(ISLAND_FLAT_R, ISLAND_SEA_R, d);
+    if (ih > h) h = ih;
+  }
+  return h;
+}
+
+/** Index of the island whose centre is nearest (x, z) — for theming. */
+function nearestIsland(x: number, z: number): number {
+  let best = 0;
+  let bestD = Infinity;
+  for (let i = 0; i < SWINGSET_POSITIONS.length; i++) {
+    const s = SWINGSET_POSITIONS[i];
+    const d = (x - s.x) * (x - s.x) + (z - s.z) * (z - s.z);
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
 }
 
 // --- shared geometry / materials -------------------------------------------
 
 const grainTex = woodGrainTexture();
 const barkMat = toonMat({ color: 0x8a5a30, map: grainTex });
-const woodMat = toonMat({ color: 0xc98a46, map: grainTex });
-const metalMat = toonMat({ color: 0x3fb8c4 });
 const chainMat = toonMat({ color: 0x3a4560 });
-const seatMat = toonMat({ color: 0x46577a });
-const leafMat = toonMat({ color: 0x4fae32, flatShading: true });
-const leafWiltMat = toonMat({ color: 0xa08c3c, flatShading: true });
+// Per-island theme materials, index-aligned with SWINGSET_POSITIONS.
+const woodMats = ISLAND_THEMES.map((t) => toonMat({ color: t.wood, map: grainTex }));
+const metalMats = ISLAND_THEMES.map((t) => toonMat({ color: t.metal }));
+const seatMats = ISLAND_THEMES.map((t) => toonMat({ color: t.seat }));
+const leafMats = ISLAND_THEMES.map((t) => toonMat({ color: t.leaf, flatShading: true }));
+const leafWiltMats = ISLAND_THEMES.map((t) => toonMat({ color: t.leafWilt, flatShading: true }));
 const cloudMat = inkWeight(
   new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false }),
   0.007,
@@ -218,8 +243,8 @@ export function createWorld(ctx: GameCtx): WorldApi {
 
   // --- terrain -------------------------------------------------------------
 
-  const tw = TERRAIN_X1 - TERRAIN_X0;
-  const td = TERRAIN_Z1 - TERRAIN_Z0;
+  const tw = TERRAIN_HALF * 2;
+  const td = TERRAIN_HALF * 2;
   const groundGeo = new THREE.PlaneGeometry(
     tw,
     td,
@@ -227,24 +252,33 @@ export function createWorld(ctx: GameCtx): WorldApi {
     Math.round(td / TERRAIN_SEG),
   );
   groundGeo.rotateX(-Math.PI / 2);
-  groundGeo.translate(TERRAIN_X0 + tw / 2, 0, TERRAIN_Z0 + td / 2);
+  groundGeo.translate(ARCHIPELAGO_CENTER.x, 0, ARCHIPELAGO_CENTER.z);
 
   {
     const pos = groundGeo.attributes.position as THREE.BufferAttribute;
     const colors = new Float32Array(pos.count * 3);
     const grass = new THREE.Color();
-    const sand = new THREE.Color(0xf2d98f);
-    const wet = new THREE.Color(0xd4b978);
+    const sand = new THREE.Color();
+    const wet = new THREE.Color();
     const c = new THREE.Color();
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const z = pos.getZ(i);
-      pos.setY(i, landHeight(x, z));
+      const h = landHeight(x, z);
+      pos.setY(i, h);
 
+      const theme = ISLAND_THEMES[nearestIsland(x, z)];
       const v = hillNoise(x * 2.3, z * 2.1);
-      grass.setHSL(0.26 + v * 0.01, 0.58 + v * 0.05, 0.42 + v * 0.03);
-      const sandT = 1 - smoothstep(6.5, 12, z); // sand strip along the shore
-      const wetT = 1 - smoothstep(-1, 2.2, z);
+      grass.setHSL(
+        theme.grass[0] + v * 0.01,
+        theme.grass[1] + v * 0.05,
+        theme.grass[2] + v * 0.03,
+      );
+      sand.setHex(theme.sand);
+      wet.setHex(theme.wetSand);
+      // Colour bands follow height: grass plateau, dry sand ring, wet shore.
+      const sandT = 1 - smoothstep(0.55, 0.95, h);
+      const wetT = 1 - smoothstep(-0.1, 0.35, h);
       c.copy(grass).lerp(sand, sandT).lerp(wet, wetT);
       colors[i * 3] = c.r;
       colors[i * 3 + 1] = c.g;
@@ -301,35 +335,58 @@ export function createWorld(ctx: GameCtx): WorldApi {
       );
   };
 
-  const waterW = 1500;
-  const waterD = 820;
-  const waterGeo = new THREE.PlaneGeometry(waterW, waterD, 150, 82);
+  const waterW = 1100;
+  const waterGeo = new THREE.PlaneGeometry(waterW, waterW, 110, 110);
   waterGeo.rotateX(-Math.PI / 2);
-  waterGeo.translate(60, 0, WATER_EDGE_Z - waterD / 2);
+  waterGeo.translate(ARCHIPELAGO_CENTER.x, 0, ARCHIPELAGO_CENTER.z);
   const water = new THREE.Mesh(waterGeo, waterMat);
   water.position.y = WATER_Y;
   water.renderOrder = 1;
   scene.add(water);
 
-  // White scallop foam where the sea meets the sand.
-  const foamTex = shoreFoamTexture();
-  foamTex.repeat.set(140, 1);
-  const foamGeo = new THREE.PlaneGeometry(waterW, 3.2);
+  // White scallop foam ring hugging each island's shoreline.
+  const foamRingTex = canvasTexture(256, 256, (c) => {
+    c.clearRect(0, 0, 256, 256);
+    c.fillStyle = 'rgba(255,255,255,0.9)';
+    c.beginPath();
+    c.arc(128, 128, 100, 0, Math.PI * 2);
+    c.arc(128, 128, 89, 0, Math.PI * 2, true);
+    c.fill('evenodd');
+    // scallops bulging outward, a fainter rank lapping inward
+    for (let i = 0; i < 30; i++) {
+      const a = (i / 30) * Math.PI * 2;
+      c.fillStyle = 'rgba(255,255,255,0.9)';
+      c.beginPath();
+      c.arc(128 + Math.cos(a) * 102, 128 + Math.sin(a) * 102, 8, 0, Math.PI * 2);
+      c.fill();
+      c.fillStyle = 'rgba(255,255,255,0.35)';
+      c.beginPath();
+      c.arc(128 + Math.cos(a + 0.1) * 84, 128 + Math.sin(a + 0.1) * 84, 6, 0, Math.PI * 2);
+      c.fill();
+    }
+  });
+  foamRingTex.wrapS = THREE.ClampToEdgeWrapping;
+  foamRingTex.wrapT = THREE.ClampToEdgeWrapping;
+  // Texture ring radius (100/128 of the half-size) lands on the shoreline.
+  const FOAM_HALF = 24.8 * (128 / 100);
+  const foamGeo = new THREE.PlaneGeometry(FOAM_HALF * 2, FOAM_HALF * 2);
   foamGeo.rotateX(-Math.PI / 2);
-  const shoreFoam = new THREE.Mesh(
-    foamGeo,
-    noOutline(
-      new THREE.MeshBasicMaterial({
-        map: foamTex,
-        transparent: true,
-        depthWrite: false,
-        opacity: 0.9,
-      }),
-    ),
+  const foamMat = noOutline(
+    new THREE.MeshBasicMaterial({
+      map: foamRingTex,
+      transparent: true,
+      depthWrite: false,
+      opacity: 0.85,
+    }),
   );
-  shoreFoam.position.set(60, WATER_Y + 0.26, WATER_EDGE_Z - 1.2);
-  shoreFoam.renderOrder = 2;
-  scene.add(shoreFoam);
+  const foamRings: THREE.Mesh[] = [];
+  for (const s of SWINGSET_POSITIONS) {
+    const foam = new THREE.Mesh(foamGeo, foamMat);
+    foam.position.set(s.x, WATER_Y + 0.12, s.z);
+    foam.renderOrder = 2;
+    scene.add(foam);
+    foamRings.push(foam);
+  }
 
   // --- clouds --------------------------------------------------------------
 
@@ -345,7 +402,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
         m.scale.setScalar(4 + cr() * 5);
         g.add(m);
       }
-      g.position.set(-260 + cr() * 700, 52 + cr() * 26, -280 + cr() * 420);
+      g.position.set(-350 + cr() * 700, 52 + cr() * 26, -320 + cr() * 640);
       scene.add(g);
       clouds.push(g);
     }
@@ -438,10 +495,21 @@ export function createWorld(ctx: GameCtx): WorldApi {
   }
   const grassMat = makeGrassMat(false);
 
-  /** Tufts never grow on the worn dirt under a swingset's seats. */
+  // Each island's frame: its swingset group is yawed to face the centre.
+  const islandYaw = SWINGSET_POSITIONS.map((_, i) => setYaw(i));
+  const islandCos = islandYaw.map(Math.cos);
+  const islandSin = islandYaw.map(Math.sin);
+
+  /** Tufts never grow on the worn dirt under a swingset's seats. The patch
+   *  rectangle lives in the swingset group's yawed frame. */
   function onWornPatch(x: number, z: number): boolean {
-    for (const s of SWINGSET_POSITIONS) {
-      if (Math.abs(x - s.x) < WORN_W / 2 + 0.8 && Math.abs(z - s.z) < WORN_D / 2 + 0.8) {
+    for (let i = 0; i < SWINGSET_POSITIONS.length; i++) {
+      const s = SWINGSET_POSITIONS[i];
+      const dx = x - s.x;
+      const dz = z - s.z;
+      const lx = dx * islandCos[i] - dz * islandSin[i];
+      const lz = dx * islandSin[i] + dz * islandCos[i];
+      if (Math.abs(lx) < WORN_W / 2 + 0.8 && Math.abs(lz) < WORN_D / 2 + 0.8) {
         return true;
       }
     }
@@ -452,6 +520,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     mesh: THREE.InstancedMesh;
     points: Array<{ x: number; z: number }>;
     seed: number;
+    theme: number; // island theme index for tuft colour
   }
   const tuftFields: TuftField[] = [];
 
@@ -464,6 +533,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
     const col = new THREE.Color();
+    const tint = ISLAND_THEMES[f.theme].tuft;
     for (let i = 0; i < f.points.length; i++) {
       const pt = f.points[i];
       pos.set(pt.x, landHeight(pt.x, pt.z), pt.z);
@@ -473,16 +543,24 @@ export function createWorld(ctx: GameCtx): WorldApi {
       const tall = r();
       scl.set(s, s * (0.5 + 1.5 * tall * tall), s);
       f.mesh.setMatrixAt(i, mat4.compose(pos, quat, scl));
-      col.setHSL(0.26 + (r() - 0.5) * 0.04, 0.55 + r() * 0.2, 0.4 + r() * 0.12);
+      col.setHSL(
+        tint[0] + (r() - 0.5) * 0.04,
+        clamp(tint[1] - 0.05 + r() * 0.2, 0, 1),
+        clamp(tint[2] - 0.04 + r() * 0.12, 0, 1),
+      );
       f.mesh.setColorAt(i, col);
     }
     f.mesh.instanceMatrix.needsUpdate = true;
     if (f.mesh.instanceColor) f.mesh.instanceColor.needsUpdate = true;
   }
 
-  function plantTufts(points: Array<{ x: number; z: number }>, seed: number): void {
+  function plantTufts(
+    points: Array<{ x: number; z: number }>,
+    seed: number,
+    theme: number,
+  ): void {
     const mesh = new THREE.InstancedMesh(bladeGeo, grassMat, points.length);
-    const f: TuftField = { mesh, points, seed };
+    const f: TuftField = { mesh, points, seed, theme };
     fillTuftField(f);
     tuftFields.push(f);
     mesh.computeBoundingSphere();
@@ -499,20 +577,10 @@ export function createWorld(ctx: GameCtx): WorldApi {
       const rad = Math.pow(r(), 0.7) * TUFT_SET_RADIUS; // denser near the set
       const x = spot.x + Math.cos(a) * rad;
       const z = spot.z + Math.sin(a) * rad;
-      if (z < GRASS_MIN_Z || onWornPatch(x, z)) continue;
+      if (landHeight(x, z) < GRASS_MIN_H || onWornPatch(x, z)) continue;
       pts.push({ x, z });
     }
-    plantTufts(pts, 811 + si);
-  }
-  {
-    const r = rng(7919);
-    const pts: Array<{ x: number; z: number }> = [];
-    for (let i = 0; i < TUFTS_BAND; i++) {
-      const x = -165 + r() * 455;
-      const z = GRASS_MIN_Z + r() * 38;
-      if (!onWornPatch(x, z)) pts.push({ x, z });
-    }
-    plantTufts(pts, 104729);
+    plantTufts(pts, 811 + si, si);
   }
 
   // Dense carpet that follows the player: a grid-snapped window of instances.
@@ -564,14 +632,20 @@ export function createWorld(ctx: GameCtx): WorldApi {
         const r = rng((Math.imul(ix, 73856093) ^ Math.imul(iz, 19349663)) >>> 0);
         const x = (ix + (r() - 0.5) * 0.9) * DENSE_CELL;
         const z = (iz + (r() - 0.5) * 0.9) * DENSE_CELL;
-        if (z < GRASS_MIN_Z || onWornPatch(x, z) || inScorched(x, z)) continue;
-        densePos.set(x, landHeight(x, z), z);
+        const h = landHeight(x, z);
+        if (h < GRASS_MIN_H || onWornPatch(x, z) || inScorched(x, z)) continue;
+        densePos.set(x, h, z);
         denseQuat.setFromAxisAngle(UP, r() * Math.PI * 2);
         const s = 0.55 + r() * 0.5; // finer undergrowth than the field accents
         const tall = r();
         denseScl.set(s, s * (0.55 + 1.3 * tall * tall), s);
         denseMesh.setMatrixAt(n, denseMat4.compose(densePos, denseQuat, denseScl));
-        denseCol.setHSL(0.26 + (r() - 0.5) * 0.04, 0.55 + r() * 0.2, 0.4 + r() * 0.12);
+        const tint = ISLAND_THEMES[nearestIsland(x, z)].tuft;
+        denseCol.setHSL(
+          tint[0] + (r() - 0.5) * 0.04,
+          clamp(tint[1] - 0.05 + r() * 0.2, 0, 1),
+          clamp(tint[2] - 0.04 + r() * 0.12, 0, 1),
+        );
         denseMesh.setColorAt(n, denseCol);
         n++;
       }
@@ -624,6 +698,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const baseY = landHeight(spot.x, spot.z);
     const group = new THREE.Group();
     group.position.set(spot.x, baseY, spot.z);
+    group.rotation.y = islandYaw[si]; // local -Z faces the Ship's water
     scene.add(group);
 
     const worn = new THREE.Mesh(wornGeo, wornMat);
@@ -634,7 +709,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     // Wooden A-frame legs at each end, splayed along Z.
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const leg = new THREE.Mesh(unitCylGeo, woodMat);
+        const leg = new THREE.Mesh(unitCylGeo, woodMats[si]);
         tmpA.set(sx * 3.85, 0, sz * 1.75);
         tmpB.set(sx * 3.4, SWING_BAR_HEIGHT, 0);
         spanCylinder(leg, tmpA, tmpB, 0.11);
@@ -642,7 +717,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
         group.add(leg);
       }
       // Cross-brace near the top of each A.
-      const brace = new THREE.Mesh(unitCylGeo, woodMat);
+      const brace = new THREE.Mesh(unitCylGeo, woodMats[si]);
       tmpA.set(sx * 3.6, SWING_BAR_HEIGHT * 0.55, -0.85);
       tmpB.set(sx * 3.6, SWING_BAR_HEIGHT * 0.55, 0.85);
       spanCylinder(brace, tmpA, tmpB, 0.07);
@@ -650,7 +725,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
       group.add(brace);
     }
 
-    const bar = new THREE.Mesh(barGeo, metalMat);
+    const bar = new THREE.Mesh(barGeo, metalMats[si]);
     bar.rotation.z = Math.PI / 2;
     bar.position.y = SWING_BAR_HEIGHT;
     bar.castShadow = true;
@@ -675,7 +750,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
         pivot.add(ch);
       }
 
-      const seat = new THREE.Mesh(seatGeo, seatMat);
+      const seat = new THREE.Mesh(seatGeo, seatMats[si]);
       seat.position.set(0, -SWING_ROPE_LENGTH, 0);
       seat.castShadow = true;
       pivot.add(seat);
@@ -694,10 +769,11 @@ export function createWorld(ctx: GameCtx): WorldApi {
         offsetX,
         phase: si * 1.7 + k * 2.3,
         sway: 0,
+        // Seat row runs along the group's local X — rotate into world space.
         restSeatPos: new THREE.Vector3(
-          spot.x + offsetX,
+          spot.x + offsetX * islandCos[si],
           baseY + SWING_BAR_HEIGHT - SWING_ROPE_LENGTH,
-          spot.z,
+          spot.z - offsetX * islandSin[si],
         ),
         pump(strength: number) {
           if (swing.broken) return; // a Broken Swing never simulates
@@ -748,11 +824,14 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const spot = SWINGSET_POSITIONS[si];
     const r = rng(4711 + si * 977);
     for (let i = 0; i < TREES_PER_SET; i++) {
-      // Loose arc behind / beside the swingset — never between it and the water.
+      // Loose arc behind / beside the swingset — never between it and the
+      // water. Laid out in the island's local frame, then yawed into place.
       const a = -1.15 + (2.3 * i) / (TREES_PER_SET - 1) + (r() - 0.5) * 0.22;
       const rad = 9.5 + r() * 5.5;
-      const x = spot.x + Math.sin(a) * rad;
-      const z = spot.z + Math.cos(a) * rad;
+      const lx = Math.sin(a) * rad;
+      const lz = Math.cos(a) * rad;
+      const x = spot.x + lx * islandCos[si] + lz * islandSin[si];
+      const z = spot.z - lx * islandSin[si] + lz * islandCos[si];
       const y = landHeight(x, z);
       const height = 6 + r() * 2;
 
@@ -776,7 +855,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
       const foliage: THREE.Mesh[] = [];
       const blobs = 2 + Math.floor(r() * 3);
       for (let b = 0; b < blobs; b++) {
-        const m = new THREE.Mesh(foliageGeo, leafMat);
+        const m = new THREE.Mesh(foliageGeo, leafMats[si]);
         const t = blobs === 1 ? 0.5 : b / (blobs - 1);
         const rr = (1.5 + r() * 0.9) * (1 - t * 0.3);
         m.scale.set(rr, rr * 0.82, rr);
@@ -826,6 +905,46 @@ export function createWorld(ctx: GameCtx): WorldApi {
     }
   }
 
+  // --- zip-line landing posts ------------------------------------------------
+  // One post on each island facing each ring neighbour; the cable from a
+  // neighbour's Lookout treetop ties off on its crossarm.
+
+  const zipPostTops = new Map<string, THREE.Vector3>();
+  const zipScratch = new THREE.Vector3();
+
+  for (let si = 0; si < SWINGSET_POSITIONS.length; si++) {
+    const spot = SWINGSET_POSITIONS[si];
+    for (const nb of ringNeighbors(si)) {
+      const n = SWINGSET_POSITIONS[nb];
+      const dx = n.x - spot.x;
+      const dz = n.z - spot.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const px = spot.x + (dx / d) * ZIP_POST_R;
+      const pz = spot.z + (dz / d) * ZIP_POST_R;
+      const py = landHeight(px, pz);
+
+      const post = new THREE.Group();
+      post.position.set(px, py, pz);
+      post.rotation.y = Math.atan2(dx / d, dz / d); // crossarm square to the cable
+      scene.add(post);
+
+      const pole = new THREE.Mesh(unitCylGeo, barkMat);
+      pole.position.y = ZIP_POST_H / 2;
+      pole.scale.set(0.14, ZIP_POST_H, 0.14);
+      pole.castShadow = true;
+      post.add(pole);
+
+      const arm = new THREE.Mesh(unitCylGeo, woodMats[si]);
+      arm.rotation.z = Math.PI / 2;
+      arm.position.y = ZIP_POST_H - 0.1;
+      arm.scale.set(0.09, 1.1, 0.09);
+      arm.castShadow = true;
+      post.add(arm);
+
+      zipPostTops.set(`${si}:${nb}`, new THREE.Vector3(px, py + ZIP_POST_H, pz));
+    }
+  }
+
   function setFoliage(tree: Tree, mat: THREE.Material): void {
     for (const m of tree.foliage) m.material = mat;
   }
@@ -841,7 +960,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     tree.tilt.visible = true;
     tree.tilt.scale.setScalar(1);
     tree.stump.visible = cause === 'chainsaw';
-    setFoliage(tree, leafWiltMat);
+    setFoliage(tree, leafWiltMats[tree.setIndex]);
     ctx.events.emit('treeFelled', { tree, cause });
   }
 
@@ -857,7 +976,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
       tree.stump.visible = true;
       tree.tilt.scale.setScalar(0.05);
       tree.tilt.visible = true;
-      setFoliage(tree, leafMat);
+      setFoliage(tree, leafMats[tree.setIndex]);
     } else {
       tree.state = 'gone';
       tree.anim = 'none';
@@ -873,9 +992,16 @@ export function createWorld(ctx: GameCtx): WorldApi {
     tree.fallAngle = tree.tilt.rotation.x;
     tree.tilt.visible = true;
     tree.stump.visible = false;
-    setFoliage(tree, leafMat);
+    setFoliage(tree, leafMats[tree.setIndex]);
     tree.fromScale = Math.max(0.2, tree.tilt.scale.x);
     tree.tilt.scale.setScalar(tree.fromScale);
+  }
+
+  /** Squared distance from the Ship's water at the archipelago centre. */
+  function centerDist2(t: Tree): number {
+    const dx = t.position.x - ARCHIPELAGO_CENTER.x;
+    const dz = t.position.z - ARCHIPELAGO_CENTER.z;
+    return dx * dx + dz * dz;
   }
 
   function syncHeartTrees(setIndex: number, hearts: number): void {
@@ -883,15 +1009,15 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const want = clamp(Math.round(hearts), 0, mine.length);
 
     const alive = mine.filter((t) => t.state === 'alive');
-    // Too many living Trees: the farthest-from-water ones fall first.
+    // Too many living Trees: the farthest-from-the-Ship ones fall first.
     if (alive.length > want) {
-      alive.sort((a, b) => b.position.z - a.position.z);
+      alive.sort((a, b) => centerDist2(b) - centerDist2(a));
       for (let i = 0; i < alive.length - want; i++) fellTree(alive[i], 'heart');
     } else if (alive.length < want) {
-      // Hearts refilled: heart-felled Trees stand back up (nearest water first).
+      // Hearts refilled: heart-felled Trees stand back up (nearest the Ship first).
       const dead = mine
         .filter((t) => t.fallCause === 'heart' && (t.state === 'fallen' || t.state === 'gone'))
-        .sort((a, b) => a.position.z - b.position.z);
+        .sort((a, b) => centerDist2(a) - centerDist2(b));
       let need = want - alive.length;
       for (const t of dead) {
         if (need <= 0) break;
@@ -1086,11 +1212,14 @@ export function createWorld(ctx: GameCtx): WorldApi {
   function update(dt: number): void {
     time += dt;
     animTime.value = time;
-    // Splotch pattern drifts slowly; shore foam breathes in and out.
+    // Splotch pattern drifts slowly; each island's foam ring breathes.
     seaTex.offset.x = time * 0.004;
     seaTex.offset.y = Math.sin(time * 0.35) * 0.01;
-    foamTex.offset.x = time * 0.012;
-    shoreFoam.position.z = WATER_EDGE_Z - 1.2 + Math.sin(time * 0.8) * 0.25;
+    for (let i = 0; i < foamRings.length; i++) {
+      const f = foamRings[i];
+      f.scale.setScalar(1 + Math.sin(time * 0.8 + i * 1.7) * 0.03);
+      f.rotation.y = time * 0.02 + i;
+    }
     sky.position.set(ctx.camera.position.x, 0, ctx.camera.position.z);
     updateSwings(dt);
     updateTrees(dt);
@@ -1099,7 +1228,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     // Drifting clouds.
     for (const c of clouds) {
       c.position.x += dt * 1.1;
-      if (c.position.x > 460) c.position.x = -300;
+      if (c.position.x > 400) c.position.x = -380;
     }
 
     // Keep the shadow camera over wherever the player is standing.
@@ -1117,7 +1246,6 @@ export function createWorld(ctx: GameCtx): WorldApi {
     swingsets,
     trees,
     groundHeightAt(x: number, z: number): number {
-      if (z < 0) return WATER_Y;
       return landHeight(x, z);
     },
     breakSwing,
@@ -1127,8 +1255,18 @@ export function createWorld(ctx: GameCtx): WorldApi {
     removeFallenTree,
     scorchGrassAt,
     shipAnchorage(setIndex: number): { x: number; z: number } {
-      const spot = SWINGSET_POSITIONS[clamp(setIndex, 0, SWINGSET_POSITIONS.length - 1)];
-      return { x: spot.x, z: ANCHORAGE_Z };
+      const i = clamp(setIndex, 0, SWINGSET_POSITIONS.length - 1);
+      const f = towardCenter(i); // island → centre; the Ship parks past the centre side
+      return {
+        x: ARCHIPELAGO_CENTER.x - f.x * SHIP_ORBIT,
+        z: ARCHIPELAGO_CENTER.z - f.z * SHIP_ORBIT,
+      };
+    },
+    zipPostTop(onSet: number, facingSet: number): THREE.Vector3 {
+      const top = zipPostTops.get(`${onSet}:${facingSet}`);
+      if (top) return zipScratch.copy(top);
+      const s = SWINGSET_POSITIONS[clamp(onSet, 0, SWINGSET_POSITIONS.length - 1)];
+      return zipScratch.set(s.x, landHeight(s.x, s.z) + ZIP_POST_H, s.z);
     },
     update,
   };

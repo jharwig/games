@@ -6,18 +6,22 @@
 
 import * as THREE from 'three';
 import {
+  ARCHIPELAGO_CENTER,
   type BallInfo,
   type GameCtx,
   type HeldKind,
   PLAYER_HIT_RADIUS,
+  SHIP_ORBIT,
+  SWINGSET_POSITIONS,
   type ShipApi,
   SWING_HIT_RADIUS,
   type SwingInfo,
   shipSpec,
   TREK_FIRE_INTERVAL,
+  towardCenter,
   WATER_Y,
 } from './types';
-import { clamp, damp } from './util';
+import { clamp, damp, wrapAngle } from './util';
 import { noOutline, toonMat } from './toon';
 
 // --- tuning -----------------------------------------------------------------
@@ -45,8 +49,7 @@ const TRAJ_COLOR = 0xe0863a; // muted danger orange
 const SCORCH_RADIUS = 2.4; // grass wiped out around a ground impact
 
 const SAIL_IN_SECONDS = 6;
-const SAIL_IN_OFFSET_X = -150; // comes out of the fog from the left
-const SAIL_IN_OFFSET_Z = -45; // ...and from deeper water
+const SAIL_IN_DIST = 170; // starts out in the fog beyond the far islands
 const MOVE_SPEED = 16; // repositioning between anchorages
 const TREK_SPEED = 5.5; // cruising along the shore during a Trek
 const SINK_SECONDS = 4;
@@ -913,8 +916,7 @@ export function createShip(ctx: GameCtx): ShipApi {
       px = nx;
       py = ny;
       pz = nz;
-      const groundY = nz > 0 ? ctx.world.groundHeightAt(nx, nz) : WATER_Y;
-      const surfaceY = Math.max(groundY, WATER_Y);
+      const surfaceY = Math.max(ctx.world.groundHeightAt(nx, nz), WATER_Y);
       if (ny <= surfaceY + BALL_RADIUS) {
         const ring = takeRing();
         ring.position.set(nx, surfaceY + 0.05, nz);
@@ -1024,10 +1026,9 @@ export function createShip(ctx: GameCtx): ShipApi {
           hitSwing = s;
         }
       }
-      // (c) ground — only where the land actually stands above the water. The
-      // beach shelves below WATER_Y for the first metres of z, and that strip
-      // is surf, not ground.
-      const surfaceY = b.pos.z > 0 ? ctx.world.groundHeightAt(b.pos.x, b.pos.z) : WATER_Y;
+      // (c) ground — only where an island actually stands above the water;
+      // the beach shelves under the sea and that fringe is surf, not ground.
+      const surfaceY = ctx.world.groundHeightAt(b.pos.x, b.pos.z);
       if (!hit && surfaceY >= WATER_Y && b.pos.y <= surfaceY + BALL_RADIUS) {
         hit = 'ground';
       }
@@ -1085,7 +1086,13 @@ export function createShip(ctx: GameCtx): ShipApi {
     destroyModel();
     model = buildModel(spec.cannons, scale);
     setAnchorFromSet(setIndex);
-    sailFrom.set(anchor.x + SAIL_IN_OFFSET_X, WATER_Y, anchor.y + SAIL_IN_OFFSET_Z);
+    // Sail in out of the fog on the far side of the archipelago.
+    const f = towardCenter(setIndex);
+    sailFrom.set(
+      ARCHIPELAGO_CENTER.x + f.x * SAIL_IN_DIST,
+      WATER_Y,
+      ARCHIPELAGO_CENTER.z + f.z * SAIL_IN_DIST,
+    );
     model.root.position.copy(sailFrom);
     sailInT = 0;
     phase = 'sailIn';
@@ -1209,7 +1216,6 @@ export function createShip(ctx: GameCtx): ShipApi {
   function updateShipMotion(dt: number): void {
     if (!model) return;
     const root = model.root;
-    const prevX = root.position.x;
 
     switch (phase) {
       case 'sailIn': {
@@ -1231,8 +1237,14 @@ export function createShip(ctx: GameCtx): ShipApi {
         }
         break;
       case 'trek': {
-        // Cruise along the shore shadowing the player's x.
-        anchor.x = ctx.player.position.x;
+        // Cruise around the centre, shadowing the player's bearing.
+        const px = ctx.player.position.x - ARCHIPELAGO_CENTER.x;
+        const pz = ctx.player.position.z - ARCHIPELAGO_CENTER.z;
+        const d = Math.hypot(px, pz) || 1;
+        anchor.set(
+          ARCHIPELAGO_CENTER.x + (px / d) * SHIP_ORBIT,
+          ARCHIPELAGO_CENTER.z + (pz / d) * SHIP_ORBIT,
+        );
         moveToward(dt, TREK_SPEED);
         break;
       }
@@ -1270,9 +1282,13 @@ export function createShip(ctx: GameCtx): ShipApi {
       model.bob.position.y = Math.sin(clock * 0.9) * 0.22 * s + Math.sin(clock * 1.7 + 1.3) * 0.08 * s;
       model.bob.rotation.z = Math.sin(clock * 0.75) * 0.055 + Math.sin(clock * 1.9) * 0.018;
       model.bob.rotation.x = Math.sin(clock * 1.15 + 0.7) * 0.03;
-      // Lean into the direction of travel.
-      const vx = (root.position.x - prevX) / Math.max(dt, 1e-5);
-      root.rotation.y = damp(root.rotation.y, clamp(-vx * 0.012, -0.22, 0.22), 2, dt);
+      // Wheel the broadside (the +Z cannon row) square to the player's island.
+      const isl =
+        SWINGSET_POSITIONS[
+          clamp(ctx.player ? ctx.player.currentSetIndex : 0, 0, SWINGSET_POSITIONS.length - 1)
+        ];
+      const wantYaw = Math.atan2(isl.x - root.position.x, isl.z - root.position.z);
+      root.rotation.y += wrapAngle(wantYaw - root.rotation.y) * (1 - Math.exp(-1.2 * dt));
       root.position.y = damp(root.position.y, WATER_Y, 4, dt);
     }
 

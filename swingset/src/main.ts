@@ -121,7 +121,7 @@ function breakSwing(swing: SwingInfo): void {
   if (set.wrecked()) {
     const anyLeft = ctx.world.swingsets.some((s) => !s.wrecked());
     if (anyLeft) {
-      events.emit('message', { text: 'Swingset wrecked! Climb a tree to spot another one!' });
+      events.emit('message', { text: 'Swingset wrecked! Climb a tree and zip to another island!' });
       ctx.ship.setTrek(true);
     } else {
       events.emit('message', { text: 'Last stand! Fight on foot!' });
@@ -193,9 +193,18 @@ events.on('shipSunk', () => {
   ctx.world.syncHeartTrees(ctx.player.currentSetIndex, ctx.hearts);
 });
 
+let hasZipped = false; // first-Lookout hint stops once the player has ridden
+
 events.on('lookoutReached', () => {
   ctx.score.treesClimbed += 1;
   addPoints(SCORE_POINTS.treeClimbed);
+  if (!hasZipped) {
+    events.emit('message', { text: '◀ ▶ — grab a zip line to another island!' });
+  }
+});
+
+events.on('zipStarted', () => {
+  hasZipped = true;
 });
 
 events.on('swingsetArrived', (e) => {
@@ -220,6 +229,7 @@ function startRun(): void {
   ctx.hearts = HEARTS_MAX;
   ctx.score = freshScore();
   ctx.foundSets = new Set([0]);
+  hasZipped = false;
   ctx.world.repairAllSwings();
   ctx.world.syncHeartTrees(0, ctx.hearts);
   ctx.tools.reset();

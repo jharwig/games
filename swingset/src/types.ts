@@ -2,12 +2,14 @@
 // Read CONTEXT.md for the game's vocabulary; the terms below match it.
 //
 // World conventions (three.js Y-up, right-handed, units = meters):
-//   - Water fills z < 0 at y = WATER_Y; the shore runs along the X axis.
-//   - The Playground is on z > 0; Swingsets face the water (a kid swinging
-//     forward moves toward -Z). The camera sits behind the player (+Z side)
-//     looking toward the water.
-//   - Swingsets are spread far apart along the shore (mostly along X); fog
-//     keeps only the current one visible.
+//   - The Playground is an archipelago: four themed Islands in a ring around
+//     open water at y = WATER_Y; the Ship waits near the centre of the ring.
+//   - Each Island's Swingset faces the centre (a kid swinging forward moves
+//     toward the Ship). The camera sits behind the player, on the side away
+//     from the centre. Per-island math uses the frame from towardCenter()/
+//     setYaw(); island 0 keeps the historical axes (-Z toward the water).
+//   - Islands are far enough apart that fog reduces the neighbours to
+//     silhouettes; a Lookout (or a zip ride) opens the fog.
 
 import * as THREE from 'three';
 
@@ -19,16 +21,88 @@ export const HEARTS_MAX = 5;
 export const SWINGS_PER_SET = 4;
 export const TREES_PER_SET = HEARTS_MAX; // one living Tree per Heart
 
-/** Swingset locations (x, z). Far enough apart that fog hides the others. */
+/** Centre of the archipelago — the Ship's water. */
+export const ARCHIPELAGO_CENTER = { x: 0, z: 0 } as const;
+export const RING_RADIUS = 80; // island centres sit on this circle
+export const SHIP_ORBIT = 25; // the Ship anchors this far from the centre
+
+/** Island (= Swingset) centres: a ring around the Ship's water. Order is
+ *  ring order — index ±1 are the two zip-line neighbours. */
 export const SWINGSET_POSITIONS: ReadonlyArray<{ x: number; z: number }> = [
-  { x: 0, z: 26 },
-  { x: 130, z: 32 },
-  { x: -140, z: 28 },
-  { x: 265, z: 30 },
+  { x: 0, z: RING_RADIUS },
+  { x: RING_RADIUS, z: 0 },
+  { x: 0, z: -RING_RADIUS },
+  { x: -RING_RADIUS, z: 0 },
 ];
 
+/** Ring neighbours of an island — zip lines connect only these. */
+export function ringNeighbors(setIndex: number): [number, number] {
+  const n = SWINGSET_POSITIONS.length;
+  return [(setIndex + 1) % n, (setIndex + n - 1) % n];
+}
+
+/** Unit XZ direction from island `setIndex` toward the archipelago centre. */
+export function towardCenter(setIndex: number): { x: number; z: number } {
+  const s = SWINGSET_POSITIONS[setIndex] ?? SWINGSET_POSITIONS[0];
+  const dx = ARCHIPELAGO_CENTER.x - s.x;
+  const dz = ARCHIPELAGO_CENTER.z - s.z;
+  const d = Math.hypot(dx, dz) || 1;
+  return { x: dx / d, z: dz / d };
+}
+
+/** rotation.y that points an island's local -Z ("toward the water" axis in
+ *  the historical convention) at the centre, where the Ship waits. */
+export function setYaw(setIndex: number): number {
+  const f = towardCenter(setIndex);
+  return Math.atan2(-f.x, -f.z);
+}
+
+// Island ground profile: flat plateau, then a beach sloping into the sea.
+export const ISLAND_TOP = 1.6; // plateau height above the water
+export const ISLAND_FLAT_R = 16; // dead flat out to here
+export const ISLAND_SEA_R = 36; // fully drowned past here
+export const SEABED_Y = -2.6;
+
+/** Per-island looks. Index-aligned with SWINGSET_POSITIONS. */
+export interface IslandTheme {
+  name: string;
+  /** Terrain grass base (HSL) — per-vertex noise varies around it. */
+  grass: [number, number, number];
+  /** Grass tuft instance colour base (HSL). */
+  tuft: [number, number, number];
+  sand: number;
+  wetSand: number;
+  leaf: number;
+  leafWilt: number;
+  wood: number; // swingset frame
+  metal: number; // top bar
+  seat: number;
+}
+
+export const ISLAND_THEMES: ReadonlyArray<IslandTheme> = [
+  { name: 'Jungle', grass: [0.26, 0.58, 0.42], tuft: [0.26, 0.6, 0.44],
+    sand: 0xf2d98f, wetSand: 0xd4b978, leaf: 0x4fae32, leafWilt: 0xa08c3c,
+    wood: 0xc98a46, metal: 0x3fb8c4, seat: 0x46577a },
+  { name: 'Autumn', grass: [0.1, 0.52, 0.44], tuft: [0.09, 0.6, 0.46],
+    sand: 0xe8cf92, wetSand: 0xc9ad70, leaf: 0xd97c26, leafWilt: 0x8a5a2c,
+    wood: 0xa96a34, metal: 0xd0542e, seat: 0x6b4a2e },
+  { name: 'Snow', grass: [0.55, 0.18, 0.86], tuft: [0.52, 0.25, 0.78],
+    sand: 0xe6edf2, wetSand: 0xbfd2dc, leaf: 0x4e8a6a, leafWilt: 0x7c8a80,
+    wood: 0xa8b8c8, metal: 0x7cc8e8, seat: 0x4a6a8a },
+  { name: 'Volcanic', grass: [0.04, 0.42, 0.26], tuft: [0.05, 0.5, 0.3],
+    sand: 0x5c5450, wetSand: 0x403a38, leaf: 0xd8452a, leafWilt: 0x6a3a28,
+    wood: 0x6a4a3a, metal: 0xe8742a, seat: 0x3a3440 },
+];
+
+// Zip lines: cable from a Lookout treetop down to a landing post on either
+// ring neighbour. The ride is locked on — it always delivers.
+export const ZIP_SPEED = 19; // m/s along the cable
+export const ZIP_SAG = 3; // max mid-cable droop
+export const ZIP_HANG = 1.5; // hands-on-cable → feet distance
+export const ZIP_POST_R = 13; // landing post's distance from its island centre
+
 export const FOG_NEAR = 45;
-export const FOG_FAR = 110; // next swingset (~130m away) is beyond the fog
+export const FOG_FAR = 150; // neighbour islands (~113m) are misty silhouettes
 
 export const SWING_ROPE_LENGTH = 3.2; // pivot (top bar) to seat
 export const SWING_BAR_HEIGHT = 3.6;
@@ -81,7 +155,7 @@ export const SCORE_POINTS = {
 export type CharacterKind = 'boy' | 'girl';
 export type ToolKind = 'chainsaw' | 'hammer' | 'magnet' | 'wrench';
 export type Screen = 'title' | 'playing' | 'roundWon' | 'gameOver';
-export type PlayerMode = 'swinging' | 'airborne' | 'ground' | 'climbing';
+export type PlayerMode = 'swinging' | 'airborne' | 'ground' | 'climbing' | 'zipline';
 export type TreeState = 'alive' | 'fallen' | 'stump' | 'gone';
 
 export interface ScoreBreakdown {
@@ -163,6 +237,8 @@ export interface GameEvents {
   treeFelled: { tree: TreeInfo; cause: 'chainsaw' | 'heart' };
   chainsawRevved: Record<string, never>;
   lookoutReached: { tree: TreeInfo };
+  /** The player grabbed a zip line at a Lookout and is riding it. */
+  zipStarted: { fromSet: number; toSet: number };
   swingsetArrived: { index: number };
   screenShake: { intensity: number }; // 0..1
   roundStarted: { round: number };
@@ -209,6 +285,7 @@ export interface InputState {
 export interface WorldApi {
   swingsets: SwingsetInfo[];
   trees: TreeInfo[];
+  /** Land surface height — below WATER_Y out at sea between the islands. */
   groundHeightAt(x: number, z: number): number;
   /** Mark broken + snap the ropes visually. */
   breakSwing(swing: SwingInfo): void;
@@ -223,8 +300,12 @@ export interface WorldApi {
   /** A blast bared the ground here: clear grass tufts within `radius` of
    *  (x, z). Grass regrows on a new Run. */
   scorchGrassAt(x: number, z: number, radius: number): void;
-  /** Water position offshore from a Swingset where the Ship parks. */
+  /** Water position where the Ship parks: between the archipelago centre
+   *  and the island it is menacing. */
   shipAnchorage(setIndex: number): { x: number; z: number };
+  /** Top of the zip-line landing post on island `onSet` that faces its ring
+   *  neighbour `facingSet`. The returned vector is shared scratch — copy it. */
+  zipPostTop(onSet: number, facingSet: number): THREE.Vector3;
   update(dt: number): void;
 }
 

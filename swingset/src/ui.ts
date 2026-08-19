@@ -393,7 +393,7 @@ export function createUi(ctx: GameCtx): UiApi {
     const hint = document.createElement('div');
     hint.className = 'pots-hint';
     hint.textContent =
-      'Space / tap = swing · arrows = run & climb · Enter = throw · M = mute';
+      'Space / tap = swing · arrows = run & climb · ◀ ▶ at a treetop = zip line · Enter = throw · M = mute';
     titleScreen.append(h, credit, bestLine, prompt, titleCards.el, hint);
   }
 

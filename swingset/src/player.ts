@@ -1,20 +1,30 @@
 // player.ts — the Character (boy/girl kid), the movement state machine
-// (swinging / airborne / ground / climbing) and the camera rig.
+// (swinging / airborne / ground / climbing / zipline) and the camera rig.
 //
 // See CONTEXT.md for vocabulary and types.ts for the module contract.
-// World conventions: the water is at -Z, the camera sits on the +Z side, a
-// Swing's positive `angle` carries the seat toward the water.
+// World conventions: the game plays in each island's frame — `frameF` points
+// from the island toward the Ship's water at the archipelago centre, `frameR`
+// to the player's screen-right, and the camera sits on the -frameF side. A
+// Swing's positive `angle` carries the seat toward the Ship.
 
 import * as THREE from 'three';
 import {
+  ARCHIPELAGO_CENTER,
   type CharacterKind,
   FOG_FAR,
   FOG_NEAR,
   type GameCtx,
   type PlayerApi,
   type PlayerMode,
+  SWINGSET_POSITIONS,
+  setYaw,
   type SwingInfo,
+  towardCenter,
   type TreeInfo,
+  ZIP_HANG,
+  ZIP_SAG,
+  ZIP_SPEED,
+  ringNeighbors,
 } from './types';
 import { clamp, damp, lerp } from './util';
 import { toonMat } from './toon';
@@ -49,6 +59,7 @@ const STUN_SECONDS = 0.6;
 const BAIL_SIDE_IMPULSE = 3.6;
 const BAIL_UP_IMPULSE = 1.8;
 const SHAKE_DECAY = 6; // ~0.5s to fade out
+const WADE_MIN = -0.35; // deepest the kid may wade below the waterline
 
 // --- scratch (no per-frame allocations) ------------------------------------
 
@@ -56,8 +67,10 @@ const tmpA = new THREE.Vector3();
 const tmpC = new THREE.Vector3();
 const tmpSeat = new THREE.Vector3();
 const tmpTop = new THREE.Vector3();
+const tmpRopeTo = new THREE.Vector3();
 const camDesired = new THREE.Vector3();
 const lookDesired = new THREE.Vector3();
+const zipOut = new THREE.Vector3();
 
 // ---------------------------------------------------------------------------
 // Procedural character rig
@@ -136,6 +149,7 @@ function buildRig(kind: CharacterKind, carryAnchor: THREE.Object3D): Rig {
   disposables.push(skin, hair, shirt, pants, shoe);
 
   const root = new THREE.Group();
+  root.rotation.order = 'YXZ'; // yaw to the island frame, then lean/tumble
   const body = new THREE.Group();
   root.add(body);
 
@@ -408,10 +422,82 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   const shakeOffset = new THREE.Vector3();
   let shakeAmp = 0;
 
+  // Island frame: frameF points from the player's island toward the Ship's
+  // water at the centre; frameR is screen-right; frameYaw faces the Ship.
+  const frameF = new THREE.Vector3(0, 0, -1);
+  const frameR = new THREE.Vector3(1, 0, 0);
+  let frameYaw = 0;
+
+  // Zip-line ride state.
+  const zipFrom = new THREE.Vector3();
+  const zipTo = new THREE.Vector3();
+  const zipDir = new THREE.Vector3(); // horizontal ride direction
+  let zipLen = 1;
+  let zipP = 0;
+  let zipToSet = -1;
+  let zipShot = -1; // committed cinematic shot; -1 forces a snap cut
+  let zipShotNow = 0; // shot aimCamera wants this frame
+
+  // Zip cables: two ink lines (one per ring neighbour) that fade in at a
+  // Lookout; the chosen one stays up for the whole ride.
+  const ROPE_PTS = 24;
+  interface Rope {
+    line: THREE.Line;
+    geo: THREE.BufferGeometry;
+    mat: THREE.LineBasicMaterial;
+    opacity: number;
+    target: number;
+    toSet: number;
+  }
+  const ropes: Rope[] = [];
+  for (let i = 0; i < 2; i++) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ROPE_PTS * 3), 3));
+    const mat = new THREE.LineBasicMaterial({ color: 0x2b2318, transparent: true, opacity: 0 });
+    const line = new THREE.Line(geo, mat);
+    line.frustumCulled = false;
+    line.visible = false;
+    ctx.scene.add(line);
+    ropes.push({ line, geo, mat, opacity: 0, target: 0, toSet: -1 });
+  }
+
+  /** A point along the cable, drooping ZIP_SAG at most mid-span. */
+  function cablePoint(
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    t: number,
+    out: THREE.Vector3,
+  ): THREE.Vector3 {
+    out.lerpVectors(from, to, t);
+    const sag = Math.min(ZIP_SAG, from.distanceTo(to) * 0.03);
+    out.y -= sag * 4 * t * (1 - t);
+    return out;
+  }
+
+  function fillRope(rope: Rope, from: THREE.Vector3, to: THREE.Vector3): void {
+    const attr = rope.geo.attributes.position as THREE.BufferAttribute;
+    for (let i = 0; i < ROPE_PTS; i++) {
+      cablePoint(from, to, i / (ROPE_PTS - 1), tmpA);
+      attr.setXYZ(i, tmpA.x, tmpA.y, tmpA.z);
+    }
+    attr.needsUpdate = true;
+  }
+
   // -------------------------------------------------------------------------
 
   function groundY(x: number, z: number): number {
     return ctx.world ? ctx.world.groundHeightAt(x, z) : 0;
+  }
+
+  /** Recompute the island frame the player is currently playing in. */
+  function updateFrame(): void {
+    let idx = currentSetIndex;
+    if (mode === 'climbing' && climbingTree) idx = climbingTree.setIndex;
+    else if (mode === 'swinging' && ridingSwing) idx = ridingSwing.setIndex;
+    const f = towardCenter(idx >= 0 ? idx : 0);
+    frameF.set(f.x, 0, f.z);
+    frameR.set(-f.z, 0, f.x);
+    frameYaw = Math.atan2(-f.x, -f.z);
   }
 
   function setCharacter(kind: CharacterKind): void {
@@ -441,7 +527,8 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     mode = 'swinging';
     vel.set(0, 0, 0);
     haveLastSeat = false;
-    facing = 0; // seated kids face the water
+    facing = setYaw(swing.setIndex); // seated kids face the Ship's water
+    updateFrame();
   }
 
   function reset(setIndex: number): void {
@@ -459,6 +546,10 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     atLookout = false;
     lookoutEmitted = false;
     throwTimer = -1;
+    zipToSet = -1;
+    zipP = 0;
+    currentSetIndex = setIndex;
+    updateFrame();
     if (swing) {
       mount(swing);
       swing.seatWorldPos(tmpSeat);
@@ -467,10 +558,14 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       mode = 'ground';
       ridingSwing = null;
       const base = set ? set.position : tmpA.set(0, 0, 0);
-      position.set(base.x + 2.5, groundY(base.x + 2.5, base.z + 2), base.z + 2);
-      facing = 0;
+      position.set(
+        base.x + frameR.x * 2.5 - frameF.x * 2,
+        0,
+        base.z + frameR.z * 2.5 - frameF.z * 2,
+      );
+      position.y = groundY(position.x, position.z);
+      facing = frameYaw;
     }
-    currentSetIndex = setIndex;
     syncRigTransform();
     // Snap the camera — reset() is the one place we do not ease.
     aimCamera();
@@ -487,13 +582,14 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       position.copy(tmpSeat);
     }
     vel.copy(seatVel);
-    vel.x += dir * BAIL_SIDE_IMPULSE;
+    vel.x += frameR.x * dir * BAIL_SIDE_IMPULSE;
+    vel.z += frameR.z * dir * BAIL_SIDE_IMPULSE;
     vel.y += BAIL_UP_IMPULSE;
     ridingSwing = null;
     mode = 'airborne';
     tumbling = false;
     hopCooldown = HOP_COOLDOWN;
-    facing = Math.atan2(-dir, 0);
+    facing = Math.atan2(-frameR.x * dir, -frameR.z * dir);
   }
 
   function tumbleOff(): void {
@@ -521,7 +617,7 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   }
 
   function land(): void {
-    position.y = groundY(position.x, position.z);
+    position.y = Math.max(groundY(position.x, position.z), WADE_MIN);
     vel.set(0, 0, 0);
     mode = 'ground';
     crouchTimer = 0.25;
@@ -625,8 +721,9 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     atLookout = false;
     vel.set(0, 0, 0);
     // The kid clings to the camera-side face of the trunk, so facing the
-    // trunk (-Z) puts their back to the camera.
-    facing = 0;
+    // trunk (toward the Ship) puts their back to the camera.
+    facing = setYaw(tree.setIndex);
+    updateFrame();
   }
 
   function updateGround(dt: number, active: boolean): void {
@@ -654,9 +751,24 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       }
     }
 
-    vel.set(mx * RUN_SPEED_X, 0, mz * RUN_SPEED_Z);
-    position.x += vel.x * dt;
-    position.z += vel.z * dt;
+    // mx runs along the island's screen-right axis, mz away from the Ship.
+    vel.set(
+      frameR.x * mx * RUN_SPEED_X - frameF.x * mz * RUN_SPEED_Z,
+      0,
+      frameR.z * mx * RUN_SPEED_X - frameF.z * mz * RUN_SPEED_Z,
+    );
+    // Soft shoreline: the kid can wade a step or two but never deeper —
+    // each axis moves only toward ground above the wade line (or uphill,
+    // so a splashdown in the shallows can always walk back out).
+    const curH = groundY(position.x, position.z);
+    const nx = position.x + vel.x * dt;
+    const nz = position.z + vel.z * dt;
+    const nxH = groundY(nx, position.z);
+    if (nxH > WADE_MIN || nxH > curH) position.x = nx;
+    else vel.x = 0;
+    const nzH = groundY(position.x, nz);
+    if (nzH > WADE_MIN || nzH > curH) position.z = nz;
+    else vel.z = 0;
     position.y = groundY(position.x, position.z);
 
     if (mx !== 0 || mz !== 0) {
@@ -699,7 +811,12 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
         atLookout = false;
         climbHeight = 0;
         mode = 'ground';
-        position.set(tree.position.x, groundY(tree.position.x, tree.position.z + 0.8), tree.position.z + 0.8);
+        position.set(
+          tree.position.x - frameF.x * 0.8,
+          0,
+          tree.position.z - frameF.z * 0.8,
+        );
+        position.y = groundY(position.x, position.z);
         hopCooldown = Math.max(hopCooldown, 0.4);
         return;
       }
@@ -707,13 +824,96 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     climbHeight = clamp(climbHeight, 0, maxClimb);
 
     // Cling to the camera-side face of the trunk.
-    position.set(tree.position.x, baseY + climbHeight, tree.position.z + 0.34);
+    position.set(
+      tree.position.x - frameF.x * 0.34,
+      baseY + climbHeight,
+      tree.position.z - frameF.z * 0.34,
+    );
 
     const wasAt = atLookout;
     atLookout = climbHeight >= maxClimb - 0.05;
+    if (atLookout) layoutLookoutRopes(tree);
     if (atLookout && !wasAt && !lookoutEmitted) {
       lookoutEmitted = true;
       ctx.events.emit('lookoutReached', { tree });
+    }
+    // Grab a zip line: left/right at the treetop rides to that neighbour.
+    if (atLookout && active) {
+      if (ctx.input.right && !prevRight) startZip(ropes[0].toSet);
+      else if (ctx.input.left && !prevLeft) startZip(ropes[1].toSet);
+    }
+  }
+
+  /** Lay both cables out from the climbed treetop and map them to screen
+   *  sides: ropes[0] rides on a Right press, ropes[1] on Left. */
+  function layoutLookoutRopes(tree: TreeInfo): void {
+    tree.topPos(tmpTop);
+    tmpTop.y += 0.35;
+    const [a, b] = ringNeighbors(tree.setIndex);
+    // Screen-right from the current camera: (look - cam) × up, flattened.
+    tmpC.subVectors(camLook, camPos).setY(0).normalize();
+    const rx = -tmpC.z;
+    const rz = tmpC.x;
+    const pa = SWINGSET_POSITIONS[a];
+    const pb = SWINGSET_POSITIONS[b];
+    const dotA = (pa.x - position.x) * rx + (pa.z - position.z) * rz;
+    const dotB = (pb.x - position.x) * rx + (pb.z - position.z) * rz;
+    const rightSet = dotA >= dotB ? a : b;
+    const leftSet = dotA >= dotB ? b : a;
+    ropes[0].toSet = rightSet;
+    tmpRopeTo.copy(ctx.world.zipPostTop(rightSet, tree.setIndex));
+    fillRope(ropes[0], tmpTop, tmpRopeTo);
+    ropes[1].toSet = leftSet;
+    tmpRopeTo.copy(ctx.world.zipPostTop(leftSet, tree.setIndex));
+    fillRope(ropes[1], tmpTop, tmpRopeTo);
+  }
+
+  function startZip(toSet: number): void {
+    const tree = climbingTree;
+    if (!tree || toSet < 0) return;
+    const fromSet = tree.setIndex;
+    tree.topPos(zipFrom);
+    zipFrom.y += 0.35;
+    zipTo.copy(ctx.world.zipPostTop(toSet, fromSet));
+    zipDir.subVectors(zipTo, zipFrom).setY(0).normalize();
+    zipLen = zipFrom.distanceTo(zipTo);
+    zipP = 0;
+    zipShot = -1;
+    zipToSet = toSet;
+    climbingTree = null;
+    atLookout = false;
+    ridingSwing = null;
+    tumbling = false;
+    vel.set(0, 0, 0);
+    mode = 'zipline';
+    facing = Math.atan2(-zipDir.x, -zipDir.z);
+    // The ride is locked on: a Heart lost to a mid-ride hit fells a Tree on
+    // the DESTINATION island, so the index moves at launch.
+    currentSetIndex = toSet;
+    updateFrame();
+    ctx.events.emit('zipStarted', { fromSet, toSet });
+  }
+
+  function updateZipline(dt: number): void {
+    zipP += (dt * ZIP_SPEED) / Math.max(zipLen, 1);
+    const p = Math.min(zipP, 1);
+    cablePoint(zipFrom, zipTo, p, tmpA);
+    position.set(tmpA.x, tmpA.y - ZIP_HANG, tmpA.z);
+    facing = Math.atan2(-zipDir.x, -zipDir.z);
+    if (zipP >= 1) {
+      // Step off past the post, onto the island.
+      position.x = zipTo.x + zipDir.x * 1.6;
+      position.z = zipTo.z + zipDir.z * 1.6;
+      position.y = groundY(position.x, position.z);
+      mode = 'ground';
+      crouchTimer = 0.25;
+      hopCooldown = 0.8;
+      // Only a real arrival during a Run counts (matches updateSetIndex).
+      const set = ctx.world?.swingsets?.[zipToSet];
+      if (ctx.screen === 'playing' && set && set.swings.some((s) => !s.broken)) {
+        ctx.events.emit('swingsetArrived', { index: zipToSet });
+      }
+      zipToSet = -1;
     }
   }
 
@@ -819,6 +1019,22 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     target.headPitch = atLookout ? -0.1 : 0.3;
   }
 
+  function poseZipline(): void {
+    // Hanging from the handle: arms overhead, knees tucked, toes trailing.
+    target.hipL = 0.55;
+    target.hipR = 0.75;
+    target.kneeL = -1.05;
+    target.kneeR = -1.35;
+    target.legSpread = 0.12;
+    target.shoulderL = 2.95;
+    target.shoulderR = 2.95;
+    target.shoulderSpread = 0.18;
+    target.elbowL = 0.45;
+    target.elbowR = 0.45;
+    target.lean = -0.08;
+    target.headPitch = -0.12;
+  }
+
   function applyPose(dt: number): void {
     const k = 14;
     pose.hipL = damp(pose.hipL, target.hipL, k, dt);
@@ -872,10 +1088,11 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   function syncRigTransform(): void {
     if (mode === 'swinging' && ridingSwing) {
       // Sit on the seat: shift the body so the hips land on the origin, and
-      // let the whole kid ride the rope's lean.
+      // let the whole kid ride the rope's lean (yaw first — order 'YXZ' —
+      // so the lean pitches along the island's swing arc).
       rig.root.position.copy(position);
       rig.body.position.y = -HIP_Y;
-      rig.root.rotation.set(ridingSwing.angle * 0.85, 0, 0);
+      rig.root.rotation.set(ridingSwing.angle * 0.85, facing, 0);
     } else {
       rig.root.position.copy(position);
       rig.body.position.y = 0;
@@ -891,13 +1108,59 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   function aimCamera(): void {
     if (mode === 'swinging' && ridingSwing) {
       const rest = ridingSwing.restSeatPos;
-      camDesired.set(rest.x, rest.y + 2.2, rest.z + 4.5);
-      lookDesired.set(rest.x, rest.y + 0.9, rest.z - 4.0);
+      camDesired.set(
+        rest.x - frameF.x * 4.5,
+        rest.y + 2.2,
+        rest.z - frameF.z * 4.5,
+      );
+      lookDesired.set(
+        rest.x + frameF.x * 4.0,
+        rest.y + 0.9,
+        rest.z + frameF.z * 4.0,
+      );
       // A touch of drift with the swing so the arc reads on screen.
-      lookDesired.z -= ridingSwing.angle * 1.2;
+      lookDesired.x += frameF.x * ridingSwing.angle * 1.2;
+      lookDesired.z += frameF.z * ridingSwing.angle * 1.2;
+    } else if (mode === 'zipline') {
+      // Cinematic cut sequence: launch → wide pass by the Ship → landing.
+      const p = Math.min(zipP, 1);
+      zipShotNow = p < 0.22 ? 0 : p < 0.72 ? 1 : 2;
+      if (zipShotNow === 0) {
+        // Over the shoulder, looking down the cable.
+        camDesired.set(
+          position.x - zipDir.x * 5.5,
+          position.y + 2.8,
+          position.z - zipDir.z * 5.5,
+        );
+        lookDesired.copy(zipTo);
+      } else if (zipShotNow === 1) {
+        // Wide side shot from out over the water — the Ship wheels in frame
+        // beyond the rider (the camera sits away from the centre).
+        zipOut
+          .set(position.x - ARCHIPELAGO_CENTER.x, 0, position.z - ARCHIPELAGO_CENTER.z)
+          .normalize();
+        camDesired.set(
+          position.x + zipOut.x * 15,
+          position.y + 3.5,
+          position.z + zipOut.z * 15,
+        );
+        lookDesired.set(
+          position.x + zipDir.x * 2,
+          position.y,
+          position.z + zipDir.z * 2,
+        );
+      } else {
+        // Landing: from beyond the post, watching the rider glide in.
+        camDesired.set(zipTo.x + zipDir.x * 9, zipTo.y + 2.0, zipTo.z + zipDir.z * 9);
+        lookDesired.set(position.x, position.y + 0.8, position.z);
+      }
     } else if (mode === 'climbing' && atLookout) {
-      // Survey the Playground from the Lookout.
-      camDesired.set(position.x, position.y + 25, position.z + 18);
+      // Survey the archipelago from the Lookout.
+      camDesired.set(
+        position.x - frameF.x * 18,
+        position.y + 25,
+        position.z - frameF.z * 18,
+      );
       const other = nearestOtherSet();
       if (other) {
         lookDesired.set(
@@ -906,17 +1169,38 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
           lerp(position.z, other.z, 0.55),
         );
       } else {
-        lookDesired.set(position.x, 1, position.z - 30);
+        lookDesired.set(
+          position.x + frameF.x * 30,
+          1,
+          position.z + frameF.z * 30,
+        );
       }
     } else if (mode === 'climbing') {
-      camDesired.set(position.x, position.y + 2.4, position.z + 7.5);
-      lookDesired.set(position.x, position.y + 0.8, position.z - 2);
+      camDesired.set(
+        position.x - frameF.x * 7.5,
+        position.y + 2.4,
+        position.z - frameF.z * 7.5,
+      );
+      lookDesired.set(
+        position.x + frameF.x * 2,
+        position.y + 0.8,
+        position.z + frameF.z * 2,
+      );
     } else {
-      // Ground / airborne follow-cam, leading a little in the run direction.
-      const leadX = clamp(vel.x, -RUN_SPEED_X, RUN_SPEED_X) * 0.28;
-      const leadZ = clamp(vel.z, -RUN_SPEED_Z, RUN_SPEED_Z) * 0.28;
-      camDesired.set(position.x + leadX * 0.5, position.y + 3.1, position.z + 6.8);
-      lookDesired.set(position.x + leadX * 1.6, position.y + 1.1, position.z + leadZ * 1.6 - 2.2);
+      // Ground / airborne follow-cam, leading a little in the run direction
+      // (va: along screen-right, vb: toward the Ship).
+      const va = clamp(vel.x * frameR.x + vel.z * frameR.z, -RUN_SPEED_X, RUN_SPEED_X) * 0.28;
+      const vb = clamp(vel.x * frameF.x + vel.z * frameF.z, -RUN_SPEED_Z, RUN_SPEED_Z) * 0.28;
+      camDesired.set(
+        position.x + frameR.x * va * 0.5 - frameF.x * 6.8,
+        position.y + 3.1,
+        position.z + frameR.z * va * 0.5 - frameF.z * 6.8,
+      );
+      lookDesired.set(
+        position.x + frameR.x * va * 1.6 + frameF.x * (vb * 1.6 + 2.2),
+        position.y + 1.1,
+        position.z + frameR.z * va * 1.6 + frameF.z * (vb * 1.6 + 2.2),
+      );
     }
   }
 
@@ -946,8 +1230,9 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     ctx.camera.lookAt(camLook);
   }
 
-  /** A Lookout is the only way to see another Swingset: the fog opens up far
-   *  enough to reveal the nearest one, and closes again on the way down. */
+  /** From the ground the neighbour islands are misty silhouettes; a Lookout
+   *  opens the fog right up to survey the ring, and a zip ride keeps the
+   *  destination island visible ahead. It closes again afterwards. */
   function updateFog(dt: number): void {
     const fog = ctx.scene.fog;
     if (!fog || !(fog instanceof THREE.Fog)) return;
@@ -957,9 +1242,12 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       const other = nearestOtherSet();
       if (other) {
         const d = Math.hypot(other.x - position.x, other.z - position.z);
-        far = Math.max(FOG_FAR, d + 30);
-        near = Math.max(FOG_NEAR, d * 0.6);
+        far = Math.max(FOG_FAR, d + 120);
+        near = Math.max(FOG_NEAR, d * 0.9);
       }
+    } else if (mode === 'zipline') {
+      const remaining = (1 - Math.min(zipP, 1)) * zipLen;
+      far = Math.max(FOG_FAR, remaining + 60);
     }
     fog.near = damp(fog.near, near, 1.6, dt);
     fog.far = damp(fog.far, far, 1.6, dt);
@@ -968,7 +1256,13 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   function updateCamera(dt: number): void {
     aimCamera();
     updateFog(dt);
-    const k = mode === 'climbing' && atLookout ? 2.2 : 4.5;
+    // Cinematic cuts: a new zip shot snaps instead of easing across the sea.
+    if (mode === 'zipline' && zipShotNow !== zipShot) {
+      zipShot = zipShotNow;
+      camPos.copy(camDesired);
+      camLook.copy(lookDesired);
+    }
+    const k = mode === 'zipline' ? 6 : mode === 'climbing' && atLookout ? 2.2 : 4.5;
     camPos.x = damp(camPos.x, camDesired.x, k, dt);
     camPos.y = damp(camPos.y, camDesired.y, k, dt);
     camPos.z = damp(camPos.z, camDesired.z, k, dt);
@@ -994,9 +1288,31 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     shakeAmp = Math.max(shakeAmp, clamp(intensity, 0, 2) * 0.5);
   }
 
+  /** Fade the zip cables: both in view at a Lookout (geometry laid out by
+   *  updateClimbing), only the ridden one during a ride, gone otherwise. */
+  function updateRopes(dt: number): void {
+    for (const rope of ropes) rope.target = 0;
+    if (mode === 'climbing' && atLookout) {
+      ropes[0].target = 0.85;
+      ropes[1].target = 0.85;
+    } else if (mode === 'zipline') {
+      fillRope(ropes[0], zipFrom, zipTo);
+      ropes[0].toSet = zipToSet;
+      ropes[0].target = 0.9;
+    }
+    for (const rope of ropes) {
+      rope.opacity = damp(rope.opacity, rope.target, 6, dt);
+      rope.mat.opacity = rope.opacity;
+      rope.line.visible = rope.opacity > 0.02;
+    }
+  }
+
   // --- swingset tracking ---------------------------------------------------
 
   function updateSetIndex(active: boolean): void {
+    // Mid-ride the index already points at the destination (set at launch);
+    // the landing emits its own arrival.
+    if (mode === 'zipline') return;
     const sets = ctx.world?.swingsets;
     if (!sets || sets.length === 0) return;
     let nearest = currentSetIndex;
@@ -1038,6 +1354,8 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     if (crouchTimer > 0) crouchTimer -= dt;
     if (pumpKick > 0) pumpKick = Math.max(0, pumpKick - dt * 4);
 
+    updateFrame();
+
     switch (mode) {
       case 'swinging':
         updateSwinging(dt, active);
@@ -1050,6 +1368,9 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
         break;
       case 'climbing':
         updateClimbing(dt, active);
+        break;
+      case 'zipline':
+        updateZipline(dt);
         break;
     }
 
@@ -1074,10 +1395,14 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       case 'climbing':
         poseClimbing();
         break;
+      case 'zipline':
+        poseZipline();
+        break;
     }
     applyPose(dt);
     syncRigTransform();
     updateSetIndex(active);
+    updateRopes(dt);
     updateCamera(dt);
   }
 
