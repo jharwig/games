@@ -158,6 +158,40 @@
   }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
+  /* outfit picker */
+  .outfitLbl {
+    font-weight: 900; font-size: 13px; letter-spacing: 0.09em;
+    color: #16324f; text-transform: uppercase; margin: 0 0 8px;
+  }
+  .outfitRow { display: flex; gap: 14px; justify-content: center; }
+  .outfitBtn {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 8px 12px 6px;
+    background: rgba(255,255,255,0.9);
+    border: 3px solid #9db7cc;
+    border-radius: 14px;
+    box-shadow: 0 3px 0 rgba(22,50,79,0.25);
+    cursor: pointer;
+    touch-action: manipulation;
+    font: inherit;
+  }
+  .outfitBtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(22,50,79,0.25); }
+  .outfitBtn.selected { border-color: #ff2e88; background: #fff; box-shadow: 0 3px 0 rgba(255,46,136,0.35); }
+  .outfitBtn canvas { width: 44px; height: 62px; image-rendering: pixelated; }
+  .outfitBtn span {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.07em;
+    color: #16324f; text-transform: uppercase;
+  }
+  #titleOutfits { margin: 0 0 14px; }
+  #outfitPick {
+    position: fixed; left: 0; right: 0;
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
+    display: none; flex-direction: column; align-items: center;
+    z-index: 9; text-align: center;
+  }
+  #outfitPick.visible { display: flex; }
+  #outfitPick .outfitLbl { color: #fff; text-shadow: 2px 2px 0 #16324f; }
+
   /* level banner */
   #banner {
     position: fixed;
@@ -263,6 +297,11 @@
 
 <div id="fallMsg">WHOOPS!</div>
 
+<div id="outfitPick">
+  <div class="outfitLbl">Pick an outfit</div>
+  <div id="podiumOutfits" class="outfitRow"></div>
+</div>
+
 <div id="title" class="overlay visible">
   <div id="titleCard">
     <h1>Ninja&nbsp;Adventure</h1>
@@ -274,6 +313,8 @@
       <b>M</b><span>Mute / unmute</span>
       <b>Touch</b><span>Hold left half to run, tap right half to jump</span>
     </div>
+    <div class="outfitLbl">Pick an outfit</div>
+    <div id="titleOutfits" class="outfitRow"></div>
     <p id="titleBest">BEST RUN: 0 PODIUMS</p>
     <div id="startHint">Press anything to start</div>
   </div>
@@ -919,44 +960,167 @@ ninjaBody.position.y = -1.0;
 ninjaFlip.add(ninjaBody);
 scene.add(ninja);
 
+// every recolorable piece is kept in `wear` so an outfit can restyle it
+var wear = {
+  skin: [], hair: [], eyes: [], shirt: [],
+  skirt: [], shorts: [], socks: [], shoes: [],
+  belt: null, band: null, tie: null, pony: []
+};
+
 var legL = limb(ninjaBody, -0.17, 0.74, 0.26, 0.74, 0.26, SKIN);
 var legR = limb(ninjaBody,  0.17, 0.74, 0.26, 0.74, 0.26, SKIN);
-box(legL, 0, -0.1, 0, 0.3, 0.34, 0.3, PANTS, true);             // skort shorts
-box(legR, 0, -0.1, 0, 0.3, 0.34, 0.3, PANTS, true);
-box(legL, 0, -0.72, 0.06, 0.3, 0.16, 0.42, 0x18202e, true);
-box(legR, 0, -0.72, 0.06, 0.3, 0.16, 0.42, 0x18202e, true);
+wear.skin.push(legL.children[0], legR.children[0]);
+wear.shorts.push(box(legL, 0, -0.1, 0, 0.3, 0.34, 0.3, PANTS, true));   // skort shorts
+wear.shorts.push(box(legR, 0, -0.1, 0, 0.3, 0.34, 0.3, PANTS, true));
+wear.socks.push(box(legL, 0, -0.56, 0, 0.3, 0.14, 0.32, 0x6d2fd6, true));
+wear.socks.push(box(legR, 0, -0.56, 0, 0.3, 0.14, 0.32, 0x6d2fd6, true));
+wear.shoes.push(box(legL, 0, -0.72, 0.06, 0.3, 0.16, 0.42, 0x18202e, true));
+wear.shoes.push(box(legR, 0, -0.72, 0.06, 0.3, 0.16, 0.42, 0x18202e, true));
 
-box(ninjaBody, 0, 1.1, 0, 0.62, 0.76, 0.4, SHIRT, true);
-box(ninjaBody, 0, 0.78, 0, 0.66, 0.16, 0.44, 0x00e0ff, true);   // belt
-box(ninjaBody, 0, 0.66, 0, 0.74, 0.14, 0.5, PANTS, true);       // skort skirt, upper flare
-box(ninjaBody, 0, 0.54, 0, 0.84, 0.12, 0.56, PANTS, true);      // skort skirt, lower flare
+wear.shirt.push(box(ninjaBody, 0, 1.1, 0, 0.62, 0.76, 0.4, SHIRT, true));
+wear.belt = box(ninjaBody, 0, 0.78, 0, 0.66, 0.16, 0.44, 0x00e0ff, true);        // belt
+wear.skirt.push(box(ninjaBody, 0, 0.66, 0, 0.74, 0.14, 0.5, PANTS, true));       // skort skirt, upper flare
+wear.skirt.push(box(ninjaBody, 0, 0.54, 0, 0.84, 0.12, 0.56, PANTS, true));      // skort skirt, lower flare
 
 var armL = limb(ninjaBody, -0.42, 1.38, 0.2, 0.64, 0.2, SKIN);
 var armR = limb(ninjaBody,  0.42, 1.38, 0.2, 0.64, 0.2, SKIN);
-box(armL, 0, -0.14, 0, 0.24, 0.3, 0.24, SHIRT, true);           // sleeve
-box(armR, 0, -0.14, 0, 0.24, 0.3, 0.24, SHIRT, true);
+wear.skin.push(armL.children[0], armR.children[0]);
+wear.shirt.push(box(armL, 0, -0.14, 0, 0.24, 0.3, 0.24, SHIRT, true));           // sleeve
+wear.shirt.push(box(armR, 0, -0.14, 0, 0.24, 0.3, 0.24, SHIRT, true));
 
 var head = new THREE.Group();
 head.position.y = 1.76;
 ninjaBody.add(head);
-box(head, 0, 0, 0, 0.52, 0.52, 0.5, SKIN, true);
-box(head, 0, 0.14, 0, 0.56, 0.16, 0.54, BAND, true);            // headband
-box(head, -0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false); // eyes
-box(head,  0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false);
-box(head, 0, 0.3, 0.02, 0.5, 0.14, 0.46, 0x25313f, true);       // hair top
-box(head, 0, 0.28, -0.28, 0.2, 0.2, 0.16, 0x25313f, true);      // ponytail base
+wear.skin.push(box(head, 0, 0, 0, 0.52, 0.52, 0.5, SKIN, true));
+wear.band = box(head, 0, 0.14, 0, 0.56, 0.16, 0.54, BAND, true);                 // headband
+wear.eyes.push(box(head, -0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false));  // eyes
+wear.eyes.push(box(head,  0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false));
+wear.hair.push(box(head, 0, 0.3, 0.02, 0.5, 0.14, 0.46, 0x25313f, true));        // hair top
+var ponyBase = box(head, 0, 0.28, -0.28, 0.2, 0.2, 0.16, 0x25313f, true);        // ponytail base
+wear.hair.push(ponyBase);
 // the ponytail hangs from two hinged segments so it can swing and whip
 var pony = new THREE.Group();
 pony.position.set(0, 0.28, -0.28);
 head.add(pony);
-box(pony, 0, 0.02, -0.05, 0.22, 0.1, 0.1, BAND, true);          // hair tie
-box(pony, 0, -0.22, -0.12, 0.16, 0.34, 0.14, 0x25313f, true);   // ponytail, upper
+wear.tie = box(pony, 0, 0.02, -0.05, 0.22, 0.1, 0.1, BAND, true);                // hair tie
+wear.hair.push(box(pony, 0, -0.22, -0.12, 0.16, 0.34, 0.14, 0x25313f, true));    // ponytail, upper
 var ponyTip = new THREE.Group();
 ponyTip.position.set(0, -0.38, -0.14);
 pony.add(ponyTip);
-box(ponyTip, 0, -0.14, -0.02, 0.13, 0.3, 0.11, 0x25313f, true); // ponytail, tip
+wear.hair.push(box(ponyTip, 0, -0.14, -0.02, 0.13, 0.3, 0.11, 0x25313f, true));  // ponytail, tip
+wear.pony.push(ponyBase, pony);
 
 ninja.traverse(function (o) { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
+
+// -------- outfits (drawn on paper, colored in here) --------
+// skirt: null means shorts only; socks/shoes: null means bare feet; band: null hides the headband
+var OUTFITS = [
+  { name: "Gemma",
+    skin: 0xd18f5f, hair: 0x8e3b28, tie: 0xb04430, band: 0x8e3b28, eyes: 0x2e62c8,
+    shirt: 0x23262b, belt: 0x16181d, skirt: 0x2f63e8, shorts: 0x2f63e8,
+    socks: 0x6d2fd6, shoes: 0x101216, pony: true },
+  { name: "Scout",
+    skin: 0xf3ac6a, hair: 0x77492a, tie: 0x77492a, band: null, eyes: 0x10161e,
+    shirt: 0x4d9e45, belt: 0x4d9e45, skirt: null, shorts: 0x2e7fd6,
+    socks: null, shoes: null, pony: false }
+];
+
+var outfitIdx = parseInt(storeGet("ninja.outfit", "0"), 10);
+if (!(outfitIdx >= 0 && outfitIdx < OUTFITS.length)) outfitIdx = 0;
+
+function applyOutfit(i) {
+  outfitIdx = i;
+  var o = OUTFITS[i];
+  function paint(list, hex) { for (var j = 0; j < list.length; j++) list[j].material = mat(hex); }
+  paint(wear.skin, o.skin);
+  paint(wear.hair, o.hair);
+  paint(wear.eyes, o.eyes);
+  paint(wear.shirt, o.shirt);
+  paint(wear.shorts, o.shorts);
+  wear.belt.material = mat(o.belt);
+  wear.tie.material = mat(o.tie);
+  for (var j = 0; j < wear.skirt.length; j++) {
+    wear.skirt[j].visible = o.skirt !== null;
+    if (o.skirt !== null) wear.skirt[j].material = mat(o.skirt);
+  }
+  for (j = 0; j < wear.socks.length; j++) {
+    wear.socks[j].visible = o.socks !== null;
+    if (o.socks !== null) wear.socks[j].material = mat(o.socks);
+  }
+  paint(wear.shoes, o.shoes !== null ? o.shoes : o.skin);
+  wear.band.visible = o.band !== null;
+  if (o.band !== null) wear.band.material = mat(o.band);
+  for (j = 0; j < wear.pony.length; j++) wear.pony[j].visible = o.pony;
+  storeSet("ninja.outfit", String(i));
+  var btns = document.querySelectorAll(".outfitBtn");
+  for (j = 0; j < btns.length; j++) btns[j].classList.toggle("selected", +btns[j].dataset.i === i);
+}
+
+// a little paper-doll preview of the outfit for the buttons
+function drawOutfitPreview(cv, o) {
+  var s = 2;
+  cv.width = 44 * s; cv.height = 62 * s;
+  var c = cv.getContext("2d");
+  c.scale(s, s);
+  function css(h) { return "#" + ("00000" + h.toString(16)).slice(-6); }
+  function r(x, y, w, h, hex) { c.fillStyle = css(hex); c.fillRect(x, y, w, h); }
+  r(14, 6, 16, 14, o.skin);                       // head
+  r(12, 3, 20, 7, o.hair);                        // hair
+  r(12, 3, 3, 10, o.hair);
+  r(29, 3, 3, 10, o.hair);
+  if (o.pony) r(31, 8, 4, 16, o.hair);            // ponytail
+  r(17, 13, 3, 4, o.eyes);                        // eyes
+  r(24, 13, 3, 4, o.eyes);
+  r(13, 21, 18, 15, o.shirt);                     // torso
+  r(8, 21, 5, 8, o.shirt);                        // sleeves
+  r(31, 21, 5, 8, o.shirt);
+  r(8, 29, 5, 11, o.skin);                        // arms
+  r(31, 29, 5, 11, o.skin);
+  if (o.skirt !== null) {
+    c.fillStyle = css(o.skirt);
+    c.beginPath();
+    c.moveTo(12, 36); c.lineTo(32, 36); c.lineTo(35, 46); c.lineTo(9, 46);
+    c.closePath(); c.fill();
+    r(15, 46, 5, 8, o.skin);                      // legs
+    r(24, 46, 5, 8, o.skin);
+  } else {
+    r(13, 36, 18, 9, o.shorts);                   // shorts
+    r(15, 45, 5, 9, o.skin);                      // legs
+    r(24, 45, 5, 9, o.skin);
+  }
+  if (o.socks !== null) { r(14, 52, 7, 4, o.socks); r(23, 52, 7, 4, o.socks); }
+  if (o.shoes !== null) { r(14, 56, 7, 5, o.shoes); r(23, 56, 7, 5, o.shoes); }
+  else { r(15, 54, 5, 5, o.skin); r(24, 54, 5, 5, o.skin); }    // bare feet
+}
+
+function buildOutfitButtons(container) {
+  OUTFITS.forEach(function (o, i) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "outfitBtn";
+    b.dataset.i = i;
+    var cv = document.createElement("canvas");
+    drawOutfitPreview(cv, o);
+    b.appendChild(cv);
+    var nm = document.createElement("span");
+    nm.textContent = o.name;
+    b.appendChild(nm);
+    // pointerdown, so a tap never doubles as a jump or a game start
+    b.addEventListener("pointerdown", function (e) {
+      e.stopPropagation();
+      e.preventDefault();
+      applyOutfit(i);
+      // give a moment on the podium to admire the new look
+      if (state === CELEBRATE) celebrateT = Math.min(celebrateT, 0.4);
+    }, { passive: false });
+    b.addEventListener("click", function (e) { e.stopPropagation(); });
+    container.appendChild(b);
+  });
+}
+buildOutfitButtons(document.getElementById("titleOutfits"));
+buildOutfitButtons(document.getElementById("podiumOutfits"));
+var outfitPickEl = document.getElementById("outfitPick");
+applyOutfit(outfitIdx);
 
 var squashT = 0;    // seconds of landing squash left
 var squashAmp = 1;  // how hard the landing was, 0..1
@@ -1834,6 +1998,7 @@ function completeLevel() {
   bannerEl.classList.remove("visible");
   void bannerEl.offsetWidth;    // restart the pop animation
   bannerEl.classList.add("visible");
+  outfitPickEl.classList.add("visible");
 
   // the next course starts right off the back of the podium
   var next = generateCourse(level + 1, p.z + 1.15, p.y);
@@ -1847,6 +2012,7 @@ function completeLevel() {
 
 function endCelebrate() {
   bannerEl.classList.remove("visible");
+  outfitPickEl.classList.remove("visible");
   snapshotPose();   // the cheer pose blends back into the run
   level++;
   levelTime = 0;
