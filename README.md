@@ -63,3 +63,26 @@ Bee Draw is a puzzle game about one line. A swarm of bees tries to reach the ani
 - **Draw** — hold one finger or the mouse button and move to make the line
 - **Lift the finger / release the button** — release the bees
 - **Tap the buttons** — change the level, change the animal, or mute the sound
+
+## Pirates of the Swingset
+
+**Designed by Genevieve**
+
+**Play:** https://jharwig.github.io/games/swingset/
+
+Pirates of the Swingset is a third-person 3D game set in a playground by the sea. You are a kid on a swingset, and a pirate ship in the water is firing cannonballs at you. Swing high to dodge — a cannonball can pass right underneath you — or jump off and run when your swing is about to be hit. The ground is not safe: cannonballs shake the earth and hurt anyone caught in the blast.
+
+- Fight back with playground tools scattered around: a chainsaw (cut down a tree and throw it), a boomerang hammer, a giant magnet (catch a cannonball in mid-air and sling it back), and a wrench (jam the ship's cannon).
+- The trees near your swingset are your five hearts: lose a heart and a tree falls down dead — but a fallen tree can be picked up and thrown at the ship.
+- Sink the ship to win the round; your hearts refill, the trees stand back up, and a slightly bigger ship sails in.
+- Broken swings stay broken. If a whole swingset is wrecked, climb a tree to spot another swingset in the playground and trek to it. If every swingset is destroyed, fight on to the last heart in an on-foot last stand.
+- Score points for hitting the ship, sinking ships, swinging, finding swingsets, and climbing trees. Your best score is saved in the browser.
+
+### Controls
+
+- **Space / SWING button** — pump the swing
+- **Left / Right arrows** — jump off the swing and run
+- **Up / Down arrows** — walk toward or away from the water, and climb trees
+- **Enter or F / THROW button** — throw or use the held tool
+- **M** — mute / unmute the sea shanty
+- Pick the boy or the girl on the title screen; you can switch after every sunken ship.

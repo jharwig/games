@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pirates of the Swingset — cel-shaded art direction</title>
+<style>
+  :root{ --bg:#0a0a10; --card:#12121c; --border:#1d1d2a; --text:#e8e8f0; --muted:#8a8aa0; }
+  html,body{ margin:0; background:var(--bg); color:var(--text); font-family:"Courier New",monospace; }
+  .wrap{ display:flex; flex-direction:column; gap:28px; align-items:center; padding:28px 16px 60px; }
+  .shot{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:16px; max-width:1000px; }
+  .shot h2{ margin:0 0 4px; font-size:14px; letter-spacing:2px; text-transform:uppercase; color:var(--text); font-weight:bold; }
+  .shot p{ margin:0 0 12px; font-size:12px; line-height:1.5; color:var(--muted); max-width:960px; }
+  canvas,img{ width:960px; max-width:92vw; display:block; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="shot">
+    <h2>Current build (reference capture)</h2>
+    <p>Round 1, boy pumping toward the incoming pirate ship.</p>
+    <img src="mockup-current.png" alt="current gameplay capture">
+  </div>
+  <div class="shot">
+    <h2>Cel-shaded A — clean cel (Wind Waker)</h2>
+    <p>No outlines — the look comes from vivid saturated color and hard
+    two-tone light/shadow boundaries (toon ramp), chunky proportions (big
+    head, big shoes), stylized sea splotches + foam around the hull, wind
+    swirls, scalloped clouds, sparkles in the grass. HUD on parchment panels.</p>
+    <canvas id="v1" width="1280" height="720"></canvas>
+  </div>
+  <div class="shot">
+    <h2>Cel-shaded B — inked cel (same + outline pass)</h2>
+    <p>Identical shading and palette, plus a dark ink outline on silhouettes
+    (inverted-hull pass in Three.js). Reads a bit more "comic", pops harder
+    on small screens.</p>
+    <canvas id="v2" width="1280" height="720"></canvas>
+  </div>
+</div>
+<script>
+"use strict";
+
+const W = 1280, H = 720, HORIZON = 300, SEA_BOT = 360, SAND_BOT = 385;
+const INK = '#2a3350';
+
+/* ==== tiny helpers ====================================================== */
+
+function path(g, pts) {
+  g.beginPath();
+  g.moveTo(pts[0][0], pts[0][1]);
+  for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0], pts[i][1]);
+  g.closePath();
+}
+// fill a poly; outline only if o.outline (silhouette shapes)
+function fp(g, o, pts, fill, outline) {
+  path(g, pts);
+  g.fillStyle = fill; g.fill();
+  if (o.outline && outline) {
+    g.lineJoin = 'round'; g.lineWidth = 5; g.strokeStyle = INK; g.stroke();
+  }
+}
+function circle(g, o, x, y, r, fill, outline) {
+  g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2);
+  g.fillStyle = fill; g.fill();
+  if (o.outline && outline) { g.lineWidth = 5; g.strokeStyle = INK; g.stroke(); }
+}
+function rr(g, x, y, w, h, r) { g.beginPath(); g.roundRect(x, y, w, h, r); }
+function line(g, x1, y1, x2, y2, c, w) {
+  g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2);
+  g.lineCap = 'round'; g.strokeStyle = c; g.lineWidth = w; g.stroke();
+}
+function heart(g, x, y, s) {
+  g.beginPath();
+  g.moveTo(x, y + s * 0.95);
+  g.bezierCurveTo(x - s * 1.1, y + s * 0.3, x - s * 0.6, y - s * 0.45, x, y + s * 0.1);
+  g.bezierCurveTo(x + s * 0.6, y - s * 0.45, x + s * 1.1, y + s * 0.3, x, y + s * 0.95);
+  g.closePath();
+}
+
+/* ==== scene ============================================================= */
+
+function drawScene(g, o) {
+  g.clearRect(0, 0, W, H);
+
+  /* --- sky --- */
+  let gr = g.createLinearGradient(0, 0, 0, HORIZON);
+  gr.addColorStop(0, '#3fb8e8');
+  gr.addColorStop(0.75, '#8fdcf4');
+  gr.addColorStop(1, '#c8f0fa');
+  g.fillStyle = gr; g.fillRect(0, 0, W, HORIZON);
+  // soft sun glare top-right
+  let rg = g.createRadialGradient(1150, 30, 20, 1150, 30, 380);
+  rg.addColorStop(0, 'rgba(255,255,240,.5)');
+  rg.addColorStop(1, 'rgba(255,255,240,0)');
+  g.fillStyle = rg; g.fillRect(0, 0, W, HORIZON);
+
+  /* --- clouds (scalloped cumulus, flat bottoms) --- */
+  cloud(g, o, 285, 120, 1.15);
+  cloud(g, o, 1075, 95, 0.85);
+  // long painted cloud near horizon
+  g.fillStyle = '#eafaff';
+  g.beginPath(); g.ellipse(920, 262, 190, 12, 0, 0, Math.PI * 2); g.fill();
+  g.beginPath(); g.ellipse(240, 250, 130, 9, 0, 0, Math.PI * 2); g.fill();
+
+  /* --- sea: saturated blue + lighter splotch rows + sparkles --- */
+  gr = g.createLinearGradient(0, HORIZON, 0, SEA_BOT);
+  gr.addColorStop(0, '#2f8ae4');
+  gr.addColorStop(1, '#1e5fd0');
+  g.fillStyle = gr; g.fillRect(0, HORIZON, W, SEA_BOT - HORIZON);
+  g.fillStyle = 'rgba(120,200,255,.55)';
+  for (let row = 0; row < 4; row++) {
+    const y = HORIZON + 8 + row * 14;
+    for (let i = 0; i < 11; i++) {
+      const x = ((i * 128 + row * 57) % (W + 120)) - 60;
+      rr(g, x, y, 46 + (i * 13 + row * 7) % 34, 6.5, 4); g.fill();
+    }
+  }
+  // horizon highlight
+  g.fillStyle = 'rgba(255,255,255,.75)'; g.fillRect(0, HORIZON, W, 3);
+  // sparkles
+  sparkle(g, 180, 322, 7, 'rgba(255,255,255,.95)');
+  sparkle(g, 1010, 316, 6, 'rgba(255,255,255,.9)');
+  sparkle(g, 470, 340, 5, 'rgba(255,255,255,.85)');
+
+  /* --- ship --- */
+  drawShip(g, o);
+
+  /* --- shore: sand + foam scallops --- */
+  fp(g, o, [[0, SEA_BOT], [W, SEA_BOT], [W, SAND_BOT], [0, SAND_BOT]], '#ffe9a8', false);
+  g.fillStyle = '#fff';
+  for (let x = -10; x < W; x += 52) {
+    g.beginPath(); g.ellipse(x + 26, SEA_BOT + 1, 30, 6, 0, 0, Math.PI); g.fill();
+  }
+
+  /* --- grass: bright green, darker patch blobs, flowers --- */
+  gr = g.createLinearGradient(0, SAND_BOT, 0, H);
+  gr.addColorStop(0, '#8ad64a');
+  gr.addColorStop(1, '#5cbc34');
+  g.fillStyle = gr; g.fillRect(0, SAND_BOT, W, H - SAND_BOT);
+  g.fillStyle = 'rgba(60,150,40,.5)';
+  const patches = [[140, 430, 70], [420, 470, 55], [760, 420, 80], [1030, 480, 65],
+                   [240, 600, 95], [590, 680, 85], [900, 620, 110], [1180, 560, 70]];
+  for (const [x, y, r] of patches) {
+    g.beginPath(); g.ellipse(x, y, r, r * 0.32, 0, 0, Math.PI * 2); g.fill();
+  }
+  flower(g, 350, 415); flower(g, 1105, 445); flower(g, 175, 540); flower(g, 815, 500);
+  sparkle(g, 500, 430, 6, 'rgba(255,255,220,.9)');
+  sparkle(g, 950, 530, 7, 'rgba(255,255,220,.85)');
+
+  /* --- blob shadows --- */
+  g.fillStyle = 'rgba(30,90,50,.35)';
+  for (const [x, w, y] of [[642, 130, 700], [885, 90, 585], [1094, 100, 598], [460, 120, 705], [95, 110, 640]]) {
+    g.beginPath(); g.ellipse(x, y, w, w * 0.22, 0, 0, Math.PI * 2); g.fill();
+  }
+
+  /* --- swingset frame --- */
+  const barY = 112;
+  // top bar: lit top, hard shadow bottom
+  fp(g, o, [[462, barY - 15], [W, barY - 23], [W, barY + 11], [462, barY + 13]], '#3fc0c8', true);
+  fp(g, o, [[462, barY + 2], [W, barY - 8], [W, barY + 11], [462, barY + 13]], '#2a8fa0', false);
+  // A-frame wooden pole, two-tone
+  fp(g, o, [[498, barY - 12], [552, barY - 8], [464, H], [398, H]], '#d09048', true);
+  fp(g, o, [[534, barY - 9], [552, barY - 8], [464, H], [432, H]], '#9a6430', false);
+  // stub branch
+  fp(g, o, [[490, 322], [560, 296], [566, 318], [498, 344]], '#c08040', true);
+
+  /* --- empty swings --- */
+  emptySwing(g, o, 852, 918, 538);
+  emptySwing(g, o, 1048, 1140, 552);
+  line(g, 1252, barY, 1276, 520, '#3a4a66', 5);
+
+  /* --- player --- */
+  drawBoy(g, o, barY);
+
+  /* --- hammers --- */
+  drawHammer(g, o, 970, 318, 0.6, -0.25);
+  drawHammer(g, o, 95, 470, 1.75, 0.35);
+
+  /* --- cannonball + smoke trail --- */
+  g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 5; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(768, 176);
+  g.quadraticCurveTo(788, 168, 800, 180);
+  g.quadraticCurveTo(810, 190, 822, 186); g.stroke();
+  circle(g, o, 836, 192, 10, '#252838', true);
+  g.fillStyle = 'rgba(255,255,255,.85)';
+  g.beginPath(); g.arc(832, 188, 3.2, 0, Math.PI * 2); g.fill();
+
+  /* --- wind swirls --- */
+  swirl(g, 380, 250, 1);
+  swirl(g, 1000, 210, 0.75);
+
+  hud(g, o);
+  banner(g);
+}
+
+/* --- WW cumulus: puff tops, flat bottom, cool under-shade --- */
+function cloud(g, o, x, y, s) {
+  const puffs = [[0, 0, 46], [52, -14, 34], [-54, -8, 32], [96, 4, 26], [-96, 6, 24], [24, -34, 26], [-24, -30, 24]];
+  if (o.outline) {
+    g.lineWidth = 11; g.strokeStyle = INK;
+    g.beginPath();
+    for (const [dx, dy, r] of puffs) g.moveTo(x + (dx + r) * s, y + dy * s), g.arc(x + dx * s, y + dy * s, r * s, 0, Math.PI * 2);
+    g.stroke();
+  }
+  g.fillStyle = '#ffffff';
+  g.beginPath();
+  for (const [dx, dy, r] of puffs) g.moveTo(x + (dx + r) * s, y + dy * s), g.arc(x + dx * s, y + dy * s, r * s, 0, Math.PI * 2);
+  g.fill();
+  // flat cool base
+  g.fillStyle = '#c9e9f6';
+  g.beginPath(); g.ellipse(x, y + 22 * s, 100 * s, 14 * s, 0, 0, Math.PI); g.fill();
+}
+
+function sparkle(g, x, y, s, c) {
+  g.fillStyle = c;
+  g.beginPath();
+  g.moveTo(x, y - s); g.quadraticCurveTo(x + s * 0.2, y - s * 0.2, x + s, y);
+  g.quadraticCurveTo(x + s * 0.2, y + s * 0.2, x, y + s);
+  g.quadraticCurveTo(x - s * 0.2, y + s * 0.2, x - s, y);
+  g.quadraticCurveTo(x - s * 0.2, y - s * 0.2, x, y - s);
+  g.fill();
+}
+
+function flower(g, x, y) {
+  g.fillStyle = '#fff';
+  for (let i = 0; i < 5; i++) {
+    const a = i / 5 * Math.PI * 2;
+    g.beginPath(); g.ellipse(x + Math.cos(a) * 6, y + Math.sin(a) * 4.5, 4.5, 3, a, 0, Math.PI * 2); g.fill();
+  }
+  g.fillStyle = '#ffd23e';
+  g.beginPath(); g.arc(x, y, 3.4, 0, Math.PI * 2); g.fill();
+}
+
+function swirl(g, x, y, s) {
+  g.strokeStyle = 'rgba(255,255,255,.8)'; g.lineWidth = 4.5 * s; g.lineCap = 'round';
+  g.beginPath();
+  g.moveTo(x - 90 * s, y + 6 * s);
+  g.quadraticCurveTo(x - 30 * s, y - 16 * s, x + 10 * s, y);
+  g.arc(x + 22 * s, y - 2 * s, 14 * s, Math.PI * 0.85, Math.PI * 2.5);
+  g.arc(x + 21 * s, y - 3 * s, 7 * s, Math.PI * 0.5, Math.PI * 1.9);
+  g.stroke();
+}
+
+function emptySwing(g, o, x1, x2, seatY) {
+  line(g, x1, 118, x1, seatY, '#3a4a66', 5);
+  line(g, x2, 116, x2, seatY, '#3a4a66', 5);
+  fp(g, o, [[x1 - 12, seatY], [x2 + 12, seatY], [x2 + 14, seatY + 16], [x1 - 14, seatY + 16]], '#4a5c80', true);
+  fp(g, o, [[x1 - 13, seatY + 8], [x2 + 13, seatY + 8], [x2 + 14, seatY + 16], [x1 - 14, seatY + 16]], '#333f5c', false);
+}
+
+/* --- chunky WW pirate ship --- */
+function drawShip(g, o) {
+  // hull: raised curved stern (left), bow + bowsprit (right)
+  g.beginPath();
+  g.moveTo(548, 232);            // stern top
+  g.quadraticCurveTo(560, 258, 566, 262);
+  g.lineTo(792, 256);
+  g.lineTo(826, 240);            // bow lip
+  g.lineTo(798, 264);
+  g.quadraticCurveTo(796, 296, 768, 310);
+  g.lineTo(596, 310);
+  g.quadraticCurveTo(560, 296, 556, 262);
+  g.closePath();
+  g.fillStyle = '#7a4a28'; g.fill();
+  if (o.outline) { g.lineWidth = 5; g.lineJoin = 'round'; g.strokeStyle = INK; g.stroke(); }
+  // red waterline stripe + gold trim
+  fp(g, o, [[566, 290], [790, 288], [768, 310], [596, 310]], '#c83c30', false);
+  fp(g, o, [[560, 262], [796, 256], [794, 265], [561, 270]], '#e8b84e', false);
+  // hull shadow side (left, away from sun)
+  g.fillStyle = 'rgba(40,20,10,.35)';
+  fp(g, { outline: false }, [[548, 232], [600, 240], [596, 310], [568, 306], [556, 262]], 'rgba(40,20,10,.35)', false);
+  // masts
+  line(g, 632, 262, 626, 118, '#4a3320', 6);
+  line(g, 718, 258, 713, 146, '#4a3320', 6);
+  // yards
+  line(g, 578, 148, 674, 142, '#4a3320', 5);
+  line(g, 672, 170, 758, 165, '#4a3320', 5);
+  // sails: white, billowed, red top stripe on main
+  sail(g, o, [[582, 152], [670, 146], [658, 234], [594, 240]], true);
+  sail(g, o, [[676, 174], [754, 169], [744, 242], [684, 248]], false);
+  // rigging
+  g.strokeStyle = 'rgba(42,51,80,.7)'; g.lineWidth = 2;
+  g.beginPath(); g.moveTo(626, 118); g.lineTo(556, 258); g.stroke();
+  g.beginPath(); g.moveTo(626, 118); g.lineTo(713, 148); g.stroke();
+  g.beginPath(); g.moveTo(713, 146); g.lineTo(824, 242); g.stroke();
+  // jolly roger pennant
+  fp(g, o, [[626, 112], [668, 118], [628, 132]], '#20222e', true);
+  g.fillStyle = '#fff';
+  g.beginPath(); g.arc(639, 120, 3.5, 0, Math.PI * 2); g.fill();
+  // foam ring at waterline
+  g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 6; g.lineCap = 'round';
+  g.beginPath(); g.ellipse(680, 310, 132, 10, 0, 0.15, Math.PI - 0.15); g.stroke();
+  g.lineWidth = 3.5;
+  g.beginPath(); g.ellipse(680, 314, 158, 12, 0, 0.35, Math.PI - 0.35); g.stroke();
+  g.beginPath(); g.arc(540, 306, 9, Math.PI, Math.PI * 2.2); g.stroke();
+  g.beginPath(); g.arc(828, 302, 8, Math.PI * 0.8, Math.PI * 2); g.stroke();
+}
+function sail(g, o, pts, stripe) {
+  path(g, pts);
+  g.fillStyle = '#fbf6e8'; g.fill();
+  if (o.outline) { g.lineWidth = 5; g.lineJoin = 'round'; g.strokeStyle = INK; g.stroke(); }
+  // cool shade on left third
+  g.save(); path(g, pts); g.clip();
+  g.fillStyle = 'rgba(140,170,210,.4)';
+  g.fillRect(pts[0][0] - 10, pts[0][1] - 10, 26, 130);
+  if (stripe) {
+    g.fillStyle = '#c83c30';
+    g.fillRect(pts[0][0] - 10, pts[0][1] - 4, 120, 17);
+  }
+  g.restore();
+}
+
+/* --- big-head boy on the swing --- */
+function drawBoy(g, o, barY) {
+  const cx = 642, seatY = 578, chL = cx - 66, chR = cx + 66;
+  // chains
+  line(g, chL - 3, barY + 6, chL, seatY, '#3a4a66', 6);
+  line(g, chR + 3, barY + 6, chR, seatY, '#3a4a66', 6);
+  const SKIN = '#ffd9a8', SKIN_S = '#e8a878';
+  const SHIRT = '#4cc264', SHIRT_S = '#2f9448';
+  const HAIR = '#8a5228', HAIR_S = '#66391c';
+  // legs: chunky, kicked forward
+  fp(g, o, [[cx - 44, seatY - 4], [cx - 14, seatY - 2], [cx - 20, 648], [cx - 52, 646]], SKIN, true);
+  fp(g, o, [[cx + 14, seatY - 2], [cx + 44, seatY - 4], [cx + 52, 646], [cx + 20, 648]], SKIN, true);
+  fp(g, o, [[cx - 30, seatY - 2], [cx - 14, seatY - 2], [cx - 20, 648], [cx - 34, 647]], SKIN_S, false);
+  fp(g, o, [[cx + 38, seatY - 3], [cx + 44, seatY - 4], [cx + 52, 646], [cx + 40, 647]], SKIN_S, false);
+  // big shoes
+  shoe(g, o, cx - 62, 640, 54); shoe(g, o, cx + 8, 640, 54);
+  // seat
+  fp(g, o, [[cx - 74, seatY - 6], [cx + 74, seatY - 6], [cx + 78, seatY + 14], [cx - 78, seatY + 14]], '#4a5c80', true);
+  fp(g, o, [[cx - 76, seatY + 5], [cx + 76, seatY + 5], [cx + 78, seatY + 14], [cx - 78, seatY + 14]], '#333f5c', false);
+  // shorts
+  fp(g, o, [[cx - 50, 540], [cx + 50, 540], [cx + 52, seatY - 4], [cx - 52, seatY - 4]], '#4a6ad8', true);
+  fp(g, o, [[cx + 18, 540], [cx + 50, 540], [cx + 52, seatY - 4], [cx + 22, seatY - 4]], '#3549a8', false);
+  // torso
+  fp(g, o, [[cx - 46, 468], [cx + 46, 468], [cx + 50, 546], [cx - 50, 546]], SHIRT, true);
+  fp(g, o, [[cx + 20, 468], [cx + 46, 468], [cx + 50, 546], [cx + 26, 546]], SHIRT_S, false);
+  // arms up to chains
+  arm(g, o, cx - 36, 492, chL, 452, SHIRT, SKIN);
+  arm(g, o, cx + 36, 492, chR, 452, SHIRT, SKIN);
+  // head: mostly hair from behind, big
+  circle(g, o, cx, 428, 48, HAIR, true);
+  // hair hard-shadow crescent (right side)
+  g.save();
+  g.beginPath(); g.arc(cx, 428, 48, 0, Math.PI * 2); g.clip();
+  g.beginPath(); g.arc(cx - 22, 422, 54, 0, Math.PI * 2);
+  g.rect(cx - 70, 408, 140, 80);
+  g.fillStyle = HAIR_S; g.fill('evenodd');
+  g.restore();
+  // neck + ears
+  g.fillStyle = SKIN;
+  g.beginPath(); g.ellipse(cx, 472, 16, 10, 0, 0, Math.PI); g.fill();
+  circle(g, o, cx - 46, 436, 9, SKIN, true);
+  circle(g, o, cx + 46, 436, 9, SKIN_S, true);
+  // cowlick
+  g.strokeStyle = HAIR_S; g.lineWidth = 4; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(cx + 6, 381); g.quadraticCurveTo(cx + 14, 368, cx + 26, 372); g.stroke();
+}
+function shoe(g, o, x, y, w) {
+  rr(g, x, y, w, 44, 12);
+  g.fillStyle = '#3c4258'; g.fill();
+  if (o.outline) { g.lineWidth = 5; g.strokeStyle = INK; g.stroke(); }
+  g.fillStyle = '#282c3e';
+  rr(g, x, y + 32, w, 12, 6); g.fill();
+  g.fillStyle = '#fff';
+  rr(g, x + 8, y + 6, w - 16, 8, 4); g.fill();
+}
+function arm(g, o, sx, sy, ex, ey, shirt, skin) {
+  line(g, sx, sy, ex, ey + 14, shirt, 21);
+  circle(g, o, ex, ey, 13, skin, true);
+}
+
+function drawHammer(g, o, x, y, s, tilt) {
+  g.save();
+  g.translate(x, y); g.rotate(tilt); g.scale(s, s);
+  fp(g, o, [[-8, 0], [4, -2], [14, 118], [0, 120]], '#d09048', true);
+  fp(g, o, [[-2, 0], [4, -2], [14, 118], [8, 119]], '#9a6430', false);
+  fp(g, o, [[-52, -34], [34, -40], [40, 6], [-46, 12]], '#5a6478', true);
+  fp(g, o, [[34, -40], [62, -20], [64, 2], [40, 6]], '#3c4356', true);
+  // specular wedge
+  fp(g, o, [[-46, -30], [-6, -33], [-10, -22], [-44, -19]], 'rgba(255,255,255,.55)', false);
+  g.restore();
+}
+
+/* ==== HUD + banner ====================================================== */
+
+function hud(g, o) {
+  const panel = (x, y, w, h, round) => {
+    g.save();
+    g.shadowColor = 'rgba(20,40,30,.35)'; g.shadowOffsetY = 3; g.shadowBlur = 4;
+    g.fillStyle = '#f9eecf';
+    if (round) { g.beginPath(); g.arc(x + w / 2, y + h / 2, w / 2, 0, Math.PI * 2); }
+    else rr(g, x, y, w, h, 10);
+    g.fill();
+    g.restore();
+    g.lineWidth = 4; g.strokeStyle = '#7a5028';
+    if (round) { g.beginPath(); g.arc(x + w / 2, y + h / 2, w / 2, 0, Math.PI * 2); }
+    else rr(g, x, y, w, h, 10);
+    g.stroke();
+  };
+  const label = (s, x, y) => {
+    g.fillStyle = '#8a6a48'; g.textAlign = 'left';
+    g.font = '700 11px "Arial Rounded MT Bold",Verdana';
+    g.fillText(s, x, y);
+  };
+  const big = (s, x, y) => {
+    g.fillStyle = '#4a3018'; g.textAlign = 'left';
+    g.font = '900 22px "Arial Rounded MT Bold",Verdana';
+    g.fillText(s, x, y);
+  };
+  // hearts
+  panel(12, 8, 172, 46);
+  for (let i = 0; i < 5; i++) {
+    heart(g, 38 + i * 30, 22, 13);
+    g.fillStyle = '#ff3f54'; g.fill();
+    g.lineWidth = 3.5; g.strokeStyle = '#7a1828'; g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.85)';
+    g.beginPath(); g.arc(32 + i * 30, 19, 3.4, 0, Math.PI * 2); g.fill();
+  }
+  panel(194, 8, 72, 46); label('ROUND', 204, 24); big('1', 204, 46);
+  panel(276, 8, 76, 46); label('BOOTY', 286, 24); big('35', 286, 46);
+  // ship hp
+  panel(12, 62, 158, 42);
+  label('PIRATE SHIP', 24, 78);
+  const bx = 24, by = 84, bw = 134, bh = 12;
+  rr(g, bx, by, bw, bh, 6); g.fillStyle = '#d8c8a0'; g.fill();
+  const gr = g.createLinearGradient(bx, 0, bx + bw, 0);
+  gr.addColorStop(0, '#ffb02e'); gr.addColorStop(1, '#ff5a2e');
+  g.save(); rr(g, bx, by, bw * 0.9, bh, 6); g.clip();
+  g.fillStyle = gr; g.fillRect(bx, by, bw, bh); g.restore();
+  rr(g, bx, by, bw, bh, 6);
+  g.lineWidth = 2.5; g.strokeStyle = '#7a5028'; g.stroke();
+  // mute
+  panel(W - 52, 8, 44, 44, true);
+  g.fillStyle = '#4a3018';
+  g.beginPath();
+  g.moveTo(W - 41, 26); g.lineTo(W - 35, 26); g.lineTo(W - 27, 18);
+  g.lineTo(W - 27, 42); g.lineTo(W - 35, 34); g.lineTo(W - 41, 34);
+  g.closePath(); g.fill();
+}
+
+function banner(g) {
+  const word = 'INCOMING!';
+  g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  g.font = '900 52px "Arial Rounded MT Bold",Verdana';
+  let widths = [], total = 0;
+  for (const ch of word) { const w = g.measureText(ch).width; widths.push(w); total += w; }
+  let x = 640 - total / 2;
+  for (let i = 0; i < word.length; i++) {
+    const t = i / (word.length - 1);
+    const y = 96 - Math.sin(t * Math.PI) * 12;
+    const rot = (t - 0.5) * 0.16 + (i % 2 ? 0.03 : -0.03);
+    g.save();
+    g.translate(x + widths[i] / 2, y); g.rotate(rot);
+    g.lineJoin = 'round';
+    g.lineWidth = 11; g.strokeStyle = '#5c3018';
+    g.strokeText(word[i], 0, 0);
+    g.fillStyle = i % 2 ? '#ffd23e' : '#ffea9a';
+    g.fillText(word[i], 0, 0);
+    g.restore();
+    x += widths[i];
+  }
+}
+
+/* ==== render ============================================================ */
+
+drawScene(document.getElementById('v1').getContext('2d'), { outline: false });
+drawScene(document.getElementById('v2').getContext('2d'), { outline: true });
+</script>
+</body>
+</html>

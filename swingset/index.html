@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b2a3d" />
+  <title>Pirates of the Swingset</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b2a3d; }
+    body {
+      font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif;
+      color: #f3ecdc;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #app { position: fixed; inset: 0; }
+    #app canvas { display: block; touch-action: none; }
+    /* All screens/HUD/touch controls are built by src/ui.ts inside #ui. */
+    #ui { position: fixed; inset: 0; pointer-events: none; }
+    #ui .clickable { pointer-events: auto; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="ui"></div>
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
