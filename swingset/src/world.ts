@@ -32,6 +32,7 @@ import {
   skyTexture,
   toonMat,
   woodGrainTexture,
+  wornDirtTexture,
 } from './toon';
 
 // --- tuning ----------------------------------------------------------------
@@ -58,6 +59,14 @@ const TERRAIN_SEG = 4; // metres per quad
 const FALL_SECONDS = 1;
 const STAND_SECONDS = 0.7;
 const ANCHORAGE_Z = -28;
+
+const WORN_W = 9.6; // worn grass/dirt patch under a swingset's seat row
+const WORN_D = 4.8;
+
+const TUFTS_PER_SET = 1700; // grass tufts clustered around each swingset
+const TUFT_SET_RADIUS = 26;
+const TUFTS_BAND = 2600; // sparse fill across the trek band between sets
+const GRASS_MIN_Z = 10; // no tufts on the sand strip
 
 // --- scratch (no per-frame allocation) -------------------------------------
 
@@ -257,7 +266,8 @@ export function createWorld(ctx: GameCtx): WorldApi {
 
   // --- water ---------------------------------------------------------------
 
-  const waterTime = { value: 0 };
+  // One shared clock uniform drives the water swell and the grass wind.
+  const animTime = { value: 0 };
   const seaTex = seaSplotchTexture();
   seaTex.repeat.set(52, 30); // splotch tiles ~28 m across the water plane
   const waterMat = noOutline(
@@ -269,7 +279,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     }),
   );
   waterMat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = waterTime;
+    shader.uniforms.uTime = animTime;
     shader.vertexShader = shader.vertexShader
       .replace('void main() {', 'uniform float uTime;\nvarying float vWave;\nvoid main() {')
       .replace(
@@ -341,10 +351,128 @@ export function createWorld(ctx: GameCtx): WorldApi {
     }
   }
 
+  // --- grass ---------------------------------------------------------------
+  // Wind-blown tufts as InstancedMeshes: the sway runs entirely in the vertex
+  // shader off the shared clock uniform, so animation costs zero per-frame JS.
+  // One mesh per swingset cluster (each frustum-culled on its own bounding
+  // sphere) plus one sparse mesh along the trek band.
+
+  const bladeGeo = (() => {
+    const r = rng(31337);
+    const verts: number[] = [];
+    const BLADES = 5;
+    for (let b = 0; b < BLADES; b++) {
+      const a = (b / BLADES) * Math.PI * 2 + r() * 1.1;
+      const dx = Math.cos(a);
+      const dz = Math.sin(a);
+      const bx = dx * (0.05 + r() * 0.1);
+      const bz = dz * (0.05 + r() * 0.1);
+      const h = 0.26 + r() * 0.44;
+      const w = 0.05 + r() * 0.035;
+      const lean = 0.1 + r() * 0.18;
+      // one tapered triangle per blade, tip leaning outward from the tuft
+      verts.push(
+        bx - dz * w, 0, bz + dx * w,
+        bx + dz * w, 0, bz - dx * w,
+        bx + dx * lean, h, bz + dz * lean,
+      );
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    // all normals point straight up so blades shade like the lawn under them
+    const normals = new Float32Array(verts.length);
+    for (let i = 0; i < normals.length; i += 3) normals[i + 1] = 1;
+    geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    return geo;
+  })();
+
+  const grassMat = noOutline(toonMat({ side: THREE.DoubleSide }));
+  grassMat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTime = animTime;
+    shader.vertexShader = shader.vertexShader
+      .replace('void main() {', 'uniform float uTime;\nvoid main() {')
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+        // Phase from the tuft's translation keeps gusts spatially coherent;
+        // the bend is pre-instance-rotation, so its direction varies per tuft.
+        vec3 tuft = instanceMatrix[3].xyz;
+        float wp = uTime * 1.8 + tuft.x * 0.24 + tuft.z * 0.19;
+        float wind = sin(wp) + 0.45 * sin(wp * 2.17 + 1.4);
+        transformed.xz += wind * vec2(0.14, 0.06) * position.y;`,
+      );
+  };
+
+  /** Tufts never grow on the worn dirt under a swingset's seats. */
+  function onWornPatch(x: number, z: number): boolean {
+    for (const s of SWINGSET_POSITIONS) {
+      if (Math.abs(x - s.x) < WORN_W / 2 + 0.8 && Math.abs(z - s.z) < WORN_D / 2 + 0.8) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function plantTufts(points: Array<{ x: number; z: number }>, seed: number): void {
+    const r = rng(seed);
+    const mesh = new THREE.InstancedMesh(bladeGeo, grassMat, points.length);
+    const mat4 = new THREE.Matrix4();
+    const quat = new THREE.Quaternion();
+    const pos = new THREE.Vector3();
+    const scl = new THREE.Vector3();
+    const col = new THREE.Color();
+    for (let i = 0; i < points.length; i++) {
+      const pt = points[i];
+      pos.set(pt.x, landHeight(pt.x, pt.z), pt.z);
+      quat.setFromAxisAngle(UP, r() * Math.PI * 2);
+      const s = 0.7 + r() * 0.6;
+      // squared draw: lots of short tufts, a scattering of knee-high ones
+      const tall = r();
+      scl.set(s, s * (0.5 + 1.5 * tall * tall), s);
+      mesh.setMatrixAt(i, mat4.compose(pos, quat, scl));
+      col.setHSL(0.26 + (r() - 0.5) * 0.04, 0.55 + r() * 0.2, 0.4 + r() * 0.12);
+      mesh.setColorAt(i, col);
+    }
+    mesh.computeBoundingSphere();
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+
+  for (let si = 0; si < SWINGSET_POSITIONS.length; si++) {
+    const spot = SWINGSET_POSITIONS[si];
+    const r = rng(6203 + si * 131);
+    const pts: Array<{ x: number; z: number }> = [];
+    while (pts.length < TUFTS_PER_SET) {
+      const a = r() * Math.PI * 2;
+      const rad = Math.pow(r(), 0.7) * TUFT_SET_RADIUS; // denser near the set
+      const x = spot.x + Math.cos(a) * rad;
+      const z = spot.z + Math.sin(a) * rad;
+      if (z < GRASS_MIN_Z || onWornPatch(x, z)) continue;
+      pts.push({ x, z });
+    }
+    plantTufts(pts, 811 + si);
+  }
+  {
+    const r = rng(7919);
+    const pts: Array<{ x: number; z: number }> = [];
+    for (let i = 0; i < TUFTS_BAND; i++) {
+      const x = -165 + r() * 455;
+      const z = GRASS_MIN_Z + r() * 38;
+      if (!onWornPatch(x, z)) pts.push({ x, z });
+    }
+    plantTufts(pts, 104729);
+  }
+
   // --- swingsets -----------------------------------------------------------
 
   const swingsets: SwingsetInfo[] = [];
   const allSwings: Swing[] = [];
+
+  // Worn grass/dirt decal where feet drag under the swings.
+  const wornTex = wornDirtTexture(SEAT_OFFSETS.map((o) => 0.5 + o / WORN_W));
+  const wornGeo = new THREE.PlaneGeometry(WORN_W, WORN_D);
+  wornGeo.rotateX(-Math.PI / 2);
+  const wornMat = noOutline(toonMat({ map: wornTex, transparent: true, depthWrite: false }));
 
   for (let si = 0; si < SWINGSET_POSITIONS.length; si++) {
     const spot = SWINGSET_POSITIONS[si];
@@ -352,6 +480,11 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const group = new THREE.Group();
     group.position.set(spot.x, baseY, spot.z);
     scene.add(group);
+
+    const worn = new THREE.Mesh(wornGeo, wornMat);
+    worn.position.y = 0.03;
+    worn.receiveShadow = true;
+    group.add(worn);
 
     // Wooden A-frame legs at each end, splayed along Z.
     for (const sx of [-1, 1]) {
@@ -806,7 +939,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
 
   function update(dt: number): void {
     time += dt;
-    waterTime.value = time;
+    animTime.value = time;
     // Splotch pattern drifts slowly; shore foam breathes in and out.
     seaTex.offset.x = time * 0.004;
     seaTex.offset.y = Math.sin(time * 0.35) * 0.01;

@@ -127,6 +127,55 @@ export function grassPatchTexture(): THREE.CanvasTexture {
   });
 }
 
+/** Worn ground under a swingset: packed dirt scuffed bare under each seat,
+ *  ringed by thin ragged grass. `seatFracs` are seat centres as 0..1 across
+ *  the texture's width. Transparent decal — lay it over the grass. */
+export function wornDirtTexture(seatFracs: number[]): THREE.CanvasTexture {
+  const tex = canvasTexture(256, 128, (c) => {
+    c.clearRect(0, 0, 256, 128);
+    // ragged fringe of thinned-out yellowing grass around the whole patch
+    for (let i = 0; i < 46; i++) {
+      const a = (i / 46) * Math.PI * 2;
+      const wob = 0.82 + Math.random() * 0.3;
+      const x = 128 + Math.cos(a) * 112 * wob;
+      const y = 64 + Math.sin(a) * 44 * wob;
+      c.fillStyle = `rgba(168,150,84,${0.22 + Math.random() * 0.16})`;
+      c.beginPath();
+      c.ellipse(x, y, 12 + Math.random() * 12, 8 + Math.random() * 8, a, 0, Math.PI * 2);
+      c.fill();
+    }
+    // trampled dirt band spanning the seat row
+    c.fillStyle = 'rgba(176,138,84,0.85)';
+    c.beginPath();
+    c.ellipse(128, 64, 102, 34, 0, 0, Math.PI * 2);
+    c.fill();
+    for (const f of seatFracs) {
+      const x = f * 256;
+      // drag ruts along the swing arc (texture y = world z)
+      c.fillStyle = 'rgba(150,112,62,0.8)';
+      c.beginPath();
+      c.roundRect(x - 7, 22, 14, 84, 7);
+      c.fill();
+      // deepest wear right under the seat
+      c.fillStyle = 'rgba(128,92,50,0.9)';
+      c.beginPath();
+      c.ellipse(x, 64, 15, 20, 0, 0, Math.PI * 2);
+      c.fill();
+    }
+    // pebbles and dry speckles in the dirt
+    for (let i = 0; i < 70; i++) {
+      const x = 128 + (Math.random() - 0.5) * 190;
+      const y = 64 + (Math.random() - 0.5) * 58;
+      c.fillStyle =
+        Math.random() < 0.5 ? 'rgba(200,170,120,0.5)' : 'rgba(110,80,45,0.4)';
+      c.fillRect(x, y, 2, 2);
+    }
+  });
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
 /** Wind Waker sea: saturated blue with rows of lighter rounded splotches.
  *  Full-color — use with a white material color. */
 export function seaSplotchTexture(): THREE.CanvasTexture {
