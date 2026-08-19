@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bee Draw — mockup</title>
+<style>
+  :root{ --bg:#0a0a10; --card:#12121c; --border:#1d1d2a; --text:#e8e8f0; --muted:#8a8aa0; --accent:#ff8f2b; }
+  html,body{ margin:0; background:var(--bg); color:var(--text); font-family:"Courier New",monospace; }
+  .wrap{ display:flex; flex-wrap:wrap; gap:24px; justify-content:center; padding:24px; }
+  .shot{ background:var(--card); border:1px solid var(--border); border-radius:8px; padding:14px; }
+  .shot h2{ margin:0 0 10px; font-size:13px; letter-spacing:2px; text-transform:uppercase; color:var(--muted); font-weight:normal; }
+  canvas{ image-rendering:pixelated; width:768px; max-width:90vw; display:block; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="shot"><h2>Title screen</h2><canvas id="title" width="256" height="160"></canvas></div>
+  <div class="shot"><h2>Gameplay — drawing phase, level 7</h2><canvas id="game" width="768" height="480" style="image-rendering:auto"></canvas></div>
+  <div class="shot"><h2>Level select</h2><canvas id="levels" width="256" height="160"></canvas></div>
+</div>
+<script>
+"use strict";
+// ==== palette (bright meadow, pixel style) ====
+var P = {
+  grass1:"#6abe30", grass2:"#5aa82a", grass3:"#7ecf3e",
+  dirt:"#b98a4e", fence:"#8a5a2b", fenceHi:"#a97843",
+  water1:"#3f8fd2", water2:"#6db4e8",
+  rock1:"#9a9aa8", rock2:"#7c7c8c", rock3:"#c0c0cc",
+  ink:"#2b2b6e", inkHi:"#4646a8",
+  beeY:"#ffd23e", beeB:"#2a2a2a", wing:"#dff2ff",
+  honey:"#e8a020", honeyHi:"#ffc84e", pot:"#8a5a2b",
+  ui:"#0a0a10", uiText:"#ffffff", uiMut:"#bcd6a0", accent:"#ff8f2b",
+  flower1:"#ff6b9d", flower2:"#fff26b", flower3:"#ffffff",
+  sky:"#a8dcf0",
+  dogB:"#a9744a", dogD:"#7c522f", catB:"#8d8d9c", cowW:"#f2f2ee", cowB:"#33333a",
+  chW:"#f4f0e2", chR:"#e04b3a", chY:"#f0a028", hoB:"#6e4a2c", hoD:"#3f2a17",
+  lock:"#55556a", open:"#3d7a2a", openHi:"#5aa82a"
+};
+function px(g,x,y,w,h,c){ g.fillStyle=c; g.fillRect(x,y,w,h); }
+
+// ==== meadow background ====
+function meadow(g){
+  px(g,0,0,256,160,P.grass1);
+  var i,x,y;
+  for(i=0;i<200;i++){ x=(i*97)%256; y=(i*61)%160;
+    px(g,x,y,2,2,(i%3===0)?P.grass2:P.grass3); }
+  for(i=0;i<14;i++){ x=20+((i*137)%216); y=18+((i*89)%124);
+    px(g,x,y,2,2,[P.flower1,P.flower2,P.flower3][i%3]);
+    px(g,x-1,y+2,1,1,P.grass2); }
+}
+// fence border with gaps (bee entrances)
+function fence(g,gaps){
+  var i;
+  for(i=0;i<256;i+=8){
+    if(!hit(gaps,i,0)) post(g,i,2);
+    if(!hit(gaps,i,1)) post(g,i,150);
+  }
+  for(i=8;i<152;i+=8){
+    if(!hit(gaps,i,2)) post(g,2,i,true);
+    if(!hit(gaps,i,3)) post(g,248,i,true);
+  }
+  function post(g,x,y){ px(g,x,y,6,3,P.fence); px(g,x,y,6,1,P.fenceHi); }
+  function hit(gaps,v,side){ var j; for(j=0;j<gaps.length;j++){ if(gaps[j][0]===side && v>=gaps[j][1] && v<gaps[j][2]) return true; } return false; }
+}
+// ==== sprites ====
+function bee(g,x,y){
+  px(g,x+1,y-2,2,2,P.wing); px(g,x+4,y-2,2,2,P.wing);
+  px(g,x,y,7,4,P.beeY);
+  px(g,x+1,y,1,4,P.beeB); px(g,x+3,y,1,4,P.beeB); px(g,x+5,y,1,4,P.beeB);
+  px(g,x+7,y+1,1,1,P.beeB);
+}
+function rocks(g,x,y){
+  px(g,x+2,y,8,3,P.rock1); px(g,x,y+2,12,5,P.rock1);
+  px(g,x+1,y+2,4,2,P.rock3); px(g,x+3,y+5,9,2,P.rock2);
+}
+function pond(g,x,y,w,h){
+  px(g,x,y,w,h,P.water1);
+  px(g,x+2,y+2,w-4,2,P.water2); px(g,x+3,y+h-5,w-8,2,P.water2);
+}
+function honeypot(g,x,y){
+  px(g,x+1,y,6,2,P.pot);
+  px(g,x,y+2,8,5,P.honey); px(g,x+1,y+2,3,2,P.honeyHi);
+  px(g,x+2,y-2,4,2,P.honeyHi);
+}
+function dog(g,x,y){
+  px(g,x+3,y,8,6,P.dogB);            // head
+  px(g,x+2,y-1,2,4,P.dogD);          // ear
+  px(g,x+9,y-1,2,4,P.dogD);          // ear
+  px(g,x+5,y+2,1,1,"#000"); px(g,x+8,y+2,1,1,"#000");
+  px(g,x+6,y+4,2,2,P.dogD);          // snout
+  px(g,x+1,y+6,12,6,P.dogB);         // body
+  px(g,x+1,y+12,2,3,P.dogD); px(g,x+11,y+12,2,3,P.dogD); // legs
+  px(g,x-1,y+6,2,3,P.dogD);          // tail
+}
+function head(g,x,y,kind){
+  if(kind===0){ // dog
+    px(g,x,y,10,9,P.dogB); px(g,x-1,y,2,5,P.dogD); px(g,x+9,y,2,5,P.dogD);
+    px(g,x+2,y+3,1,2,"#000"); px(g,x+7,y+3,1,2,"#000"); px(g,x+4,y+6,2,2,P.dogD);
+  } else if(kind===1){ // cat
+    px(g,x,y+1,10,8,P.catB); px(g,x,y-1,2,3,P.catB); px(g,x+8,y-1,2,3,P.catB);
+    px(g,x+2,y+3,1,2,"#2aa02a"); px(g,x+7,y+3,1,2,"#2aa02a"); px(g,x+4,y+6,2,1,"#d06a8a");
+  } else if(kind===2){ // cow
+    px(g,x,y,10,9,P.cowW); px(g,x+5,y+1,4,3,P.cowB); px(g,x+1,y+5,3,2,P.cowB);
+    px(g,x+2,y+3,1,2,"#000"); px(g,x+7,y+3,1,2,"#000");
+    px(g,x-1,y+1,2,2,P.cowB); px(g,x+9,y+1,2,2,P.cowB);
+    px(g,x+3,y+7,4,2,"#e8b8c8");
+  } else if(kind===3){ // chicken
+    px(g,x+1,y+1,8,8,P.chW); px(g,x+2,y-1,5,2,P.chR);
+    px(g,x+3,y+3,1,2,"#000"); px(g,x+6,y+3,1,2,"#000"); px(g,x+4,y+5,2,2,P.chY);
+  } else { // horse
+    px(g,x,y,10,9,P.hoB); px(g,x+2,y-2,6,3,P.hoD);
+    px(g,x+2,y+3,1,2,"#000"); px(g,x+7,y+3,1,2,"#000"); px(g,x+3,y+7,4,2,P.hoD);
+  }
+}
+function text(g,s,x,y,c,size){
+  g.fillStyle=c; g.font=(size||8)+"px 'Courier New',monospace"; g.textBaseline="top";
+  g.fillText(s,x,y);
+}
+
+// ==== HUD bar ====
+function hud(g,level,ink,time){
+  px(g,0,0,256,12,P.ui);
+  text(g,"LV "+level,6,2,P.uiText,9);
+  text(g,"INK",70,3,P.uiMut,7);
+  px(g,92,3,80,6,"#1d1d2a"); px(g,93,4,Math.floor(78*ink),4,P.beeY);
+  text(g,time,222,2,P.uiText,9);
+}
+
+// ================= TITLE =================
+(function(){
+  var g=document.getElementById("title").getContext("2d");
+  px(g,0,0,256,160,P.sky);
+  px(g,0,110,256,50,P.grass1);
+  var i; for(i=0;i<40;i++) px(g,(i*67)%256,112+((i*31)%46),2,2,P.grass2);
+  // sun
+  px(g,222,14,14,14,P.beeY); px(g,225,11,8,20,P.beeY); px(g,219,17,20,8,P.beeY);
+  // big bees near the logo
+  bee(g,52,30); bee(g,190,52);
+  // logo
+  text(g,"BEE DRAW",56,38,"#2b2b6e",28);
+  text(g,"BEE DRAW",54,36,P.beeY,28);
+  text(g,"designed by Priella",78,66,"#3a5a20",9);
+  // animal picker
+  text(g,"pick your animal",84,84,"#2b2b6e",8);
+  var names=["DOG","CAT","COW","HEN","HORSE"];
+  for(i=0;i<5;i++){
+    var x=38+i*38, y=98;
+    px(g,x-3,y-3,17,17,(i===0)?P.beeY:"#ffffff");
+    px(g,x-2,y-2,15,15,(i===0)?"#fff8dc":"#e8f4d8");
+    head(g,x,y,i);
+    text(g,names[i],x-2,y+16,"#2b2b6e",6);
+  }
+  // play button
+  px(g,98,132,60,18,P.accent); px(g,98,132,60,2,"#ffc07a");
+  text(g,"PLAY",114,136,"#2b1200",11);
+  text(g,"best level 12",92,153,"#3a5a20",7);
+})();
+
+// ================= GAMEPLAY (cartoon style) =================
+(function(){
+  var g=document.getElementById("game").getContext("2d");
+  var W=768,H=480;
+  var OUT="#3a2a12"; // cartoon outline color
+
+  // --- meadow ---
+  var sky=g.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#8ed94b"); sky.addColorStop(1,"#57a82e");
+  g.fillStyle=sky; g.fillRect(0,0,W,H);
+  // soft light patches
+  var i,x,y;
+  for(i=0;i<9;i++){
+    x=(i*211)%W; y=60+((i*157)%(H-120));
+    var rg=g.createRadialGradient(x,y,0,x,y,90);
+    rg.addColorStop(0,"rgba(255,255,180,0.10)"); rg.addColorStop(1,"rgba(255,255,180,0)");
+    g.fillStyle=rg; g.beginPath(); g.arc(x,y,90,0,7); g.fill();
+  }
+  // grass tufts
+  g.strokeStyle="rgba(30,90,20,0.5)"; g.lineWidth=2; g.lineCap="round";
+  for(i=0;i<80;i++){
+    x=20+((i*173)%(W-40)); y=60+((i*97)%(H-110));
+    g.beginPath(); g.moveTo(x,y); g.quadraticCurveTo(x-3,y-7,x-5,y-10);
+    g.moveTo(x,y); g.quadraticCurveTo(x+1,y-8,x+3,y-12);
+    g.moveTo(x,y); g.quadraticCurveTo(x+5,y-6,x+8,y-9);
+    g.stroke();
+  }
+  // flowers
+  function flower(x,y,c){
+    var a; g.fillStyle=c;
+    for(a=0;a<5;a++){ g.beginPath();
+      g.arc(x+Math.cos(a*1.257)*5,y+Math.sin(a*1.257)*5,3.4,0,7); g.fill(); }
+    g.fillStyle="#ffd23e"; g.beginPath(); g.arc(x,y,3,0,7); g.fill();
+  }
+  var fc=["#ff6b9d","#ffffff","#c78bff","#ff9d5c"];
+  for(i=0;i<12;i++){ flower(40+((i*199)%(W-80)),70+((i*131)%(H-130)),fc[i%4]); }
+
+  // --- fence with gaps ---
+  function post(x,y){
+    g.fillStyle="#a97843"; g.strokeStyle=OUT; g.lineWidth=2.5;
+    rr(x-5,y-16,10,32,4); g.fill(); g.stroke();
+    g.fillStyle="#c8955c"; rr(x-3,y-14,3,28,2); g.fill();
+  }
+  function rr(x,y,w,h,r){ g.beginPath();
+    g.moveTo(x+r,y); g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
+    g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+  function rail(x1,y1,x2,y2){
+    g.strokeStyle=OUT; g.lineWidth=9; g.lineCap="round";
+    g.beginPath(); g.moveTo(x1,y1); g.lineTo(x2,y2); g.stroke();
+    g.strokeStyle="#a97843"; g.lineWidth=5;
+    g.beginPath(); g.moveTo(x1,y1); g.lineTo(x2,y2); g.stroke();
+  }
+  // top fence (gap 430..560), bottom fence, left fence (gap 150..260), right fence (gap 260..360)
+  rail(14,52,428,52); rail(562,52,W-14,52);
+  rail(14,H-18,W-14,H-18);
+  rail(16,54,16,148); rail(16,262,16,H-20);
+  rail(W-16,54,W-16,258); rail(W-16,362,W-16,H-20);
+  for(x=20;x<W-10;x+=52){ if(!(x>420&&x<570)) post(x,52); post(x,H-18); }
+  for(y=90;y<H-30;y+=52){ if(!(y>140&&y<270)) post2(16,y); if(!(y>250&&y<370)) post2(W-16,y); }
+  function post2(x,y){ post(x,y); }
+
+  // --- pond (no-draw zone) ---
+  g.save();
+  g.translate(150,340);
+  g.beginPath();
+  g.moveTo(-95,0); g.bezierCurveTo(-95,-52,-30,-68,20,-58);
+  g.bezierCurveTo(80,-46,100,-8,80,28); g.bezierCurveTo(58,64,-70,58,-95,0);
+  g.closePath();
+  var pg=g.createRadialGradient(0,-10,10,0,0,110);
+  pg.addColorStop(0,"#7cc4ec"); pg.addColorStop(1,"#3577c2");
+  g.fillStyle=pg; g.fill();
+  g.strokeStyle=OUT; g.lineWidth=3.5; g.stroke();
+  g.strokeStyle="rgba(255,255,255,0.65)"; g.lineWidth=2.5; g.lineCap="round";
+  g.beginPath(); g.moveTo(-52,-14); g.quadraticCurveTo(-38,-20,-22,-14); g.stroke();
+  g.beginPath(); g.moveTo(8,10); g.quadraticCurveTo(26,4,42,10); g.stroke();
+  g.beginPath(); g.moveTo(-30,26); g.quadraticCurveTo(-16,20,-2,26); g.stroke();
+  g.restore();
+
+  // --- rocks ---
+  function rockCluster(x,y,s){
+    g.save(); g.translate(x,y); g.scale(s,s);
+    g.strokeStyle=OUT; g.lineWidth=3.5/s;
+    var shapes=[[-26,6,22,16],[6,4,26,20],[-6,-10,18,13]];
+    var j;
+    for(j=0;j<shapes.length;j++){
+      var sh=shapes[j];
+      var rg2=g.createRadialGradient(sh[0]-6,sh[1]-8,2,sh[0],sh[1],sh[2]+6);
+      rg2.addColorStop(0,"#d8d8e2"); rg2.addColorStop(1,"#8a8a9c");
+      g.fillStyle=rg2;
+      g.beginPath(); g.ellipse(sh[0],sh[1],sh[2],sh[3],0,0,7); g.fill(); g.stroke();
+    }
+    g.restore();
+  }
+  rockCluster(300,150,1); rockCluster(560,388,0.9);
+
+  // --- honey pot ---
+  g.save(); g.translate(636,180);
+  g.strokeStyle=OUT; g.lineWidth=3;
+  var hg=g.createLinearGradient(0,-16,0,22);
+  hg.addColorStop(0,"#ffc84e"); hg.addColorStop(1,"#d88a12");
+  g.fillStyle=hg;
+  g.beginPath();
+  g.moveTo(-16,-8); g.bezierCurveTo(-24,4,-20,20,0,22);
+  g.bezierCurveTo(20,20,24,4,16,-8); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle="#8a5a2b"; rr(-14,-16,28,9,4); g.fill(); g.stroke();
+  g.fillStyle="#ffdf8a"; // dripping honey
+  g.beginPath(); g.moveTo(-8,-7); g.bezierCurveTo(-8,2,-2,0,-2,-7); g.closePath(); g.fill();
+  g.fillStyle="rgba(255,255,255,0.5)";
+  g.beginPath(); g.ellipse(-8,2,4,7,-0.4,0,7); g.fill();
+  g.restore();
+
+  // --- ink line (the player's drawing) ---
+  function inkPath(){
+    g.beginPath();
+    g.moveTo(322,158);
+    g.bezierCurveTo(430,140,540,200,552,290);
+    g.bezierCurveTo(560,362,470,412,380,400);
+    g.lineTo(232,332);
+  }
+  g.lineCap="round"; g.lineJoin="round";
+  g.strokeStyle="rgba(0,0,0,0.18)"; g.lineWidth=14; inkPath(); g.stroke(); // soft shadow
+  g.strokeStyle="#2b2b6e"; g.lineWidth=10; inkPath(); g.stroke();
+  g.strokeStyle="#5c5cc0"; g.lineWidth=3.5; inkPath(); g.stroke();
+  // finger point at the line end
+  g.fillStyle="#ffffff"; g.beginPath(); g.arc(232,332,9,0,7); g.fill();
+  g.strokeStyle="#2b2b6e"; g.lineWidth=3.5; g.beginPath(); g.arc(232,332,9,0,7); g.stroke();
+  g.fillStyle="#2b2b6e"; g.beginPath(); g.arc(232,332,3.5,0,7); g.fill();
+
+  // --- cartoon dog (the protected animal) ---
+  g.save(); g.translate(408,268);
+  g.strokeStyle=OUT; g.lineWidth=3.5;
+  g.fillStyle="rgba(0,0,0,0.15)"; g.beginPath(); g.ellipse(0,44,34,8,0,0,7); g.fill(); // shadow
+  var bg2=g.createLinearGradient(0,-40,0,44);
+  bg2.addColorStop(0,"#c08a55"); bg2.addColorStop(1,"#96662f");
+  g.fillStyle=bg2;
+  g.beginPath(); g.ellipse(0,20,26,24,0,0,7); g.fill(); g.stroke();      // body
+  // tail
+  g.beginPath(); g.moveTo(22,18); g.quadraticCurveTo(42,10,40,-4);
+  g.quadraticCurveTo(48,10,26,26); g.closePath(); g.fill(); g.stroke();
+  // paws
+  g.beginPath(); g.ellipse(-12,40,8,6,0,0,7); g.fill(); g.stroke();
+  g.beginPath(); g.ellipse(12,40,8,6,0,0,7); g.fill(); g.stroke();
+  // head
+  g.beginPath(); g.arc(0,-20,24,0,7); g.fill(); g.stroke();
+  // ears
+  g.fillStyle="#7c522f";
+  g.beginPath(); g.moveTo(-20,-34); g.quadraticCurveTo(-34,-24,-26,-4);
+  g.quadraticCurveTo(-18,-8,-14,-24); g.closePath(); g.fill(); g.stroke();
+  g.beginPath(); g.moveTo(20,-34); g.quadraticCurveTo(34,-24,26,-4);
+  g.quadraticCurveTo(18,-8,14,-24); g.closePath(); g.fill(); g.stroke();
+  // muzzle
+  g.fillStyle="#e8cfa8"; g.beginPath(); g.ellipse(0,-12,12,9,0,0,7); g.fill(); g.stroke();
+  g.fillStyle=OUT; g.beginPath(); g.ellipse(0,-16,4.5,3.5,0,0,7); g.fill(); // nose
+  // eyes
+  g.fillStyle="#ffffff"; g.beginPath(); g.arc(-9,-26,5.5,0,7); g.fill();
+  g.beginPath(); g.arc(9,-26,5.5,0,7); g.fill();
+  g.fillStyle="#2a1a08"; g.beginPath(); g.arc(-8,-25,3,0,7); g.fill();
+  g.beginPath(); g.arc(10,-25,3,0,7); g.fill();
+  g.fillStyle="#fff"; g.beginPath(); g.arc(-9,-26.5,1.2,0,7); g.fill();
+  g.beginPath(); g.arc(9,-26.5,1.2,0,7); g.fill();
+  // tongue + smile
+  g.strokeStyle=OUT; g.lineWidth=2.5;
+  g.beginPath(); g.moveTo(-6,-8); g.quadraticCurveTo(0,-4,6,-8); g.stroke();
+  g.fillStyle="#ff8a9d";
+  g.beginPath(); g.moveTo(-2,-6); g.quadraticCurveTo(0,2,4,-5); g.closePath(); g.fill();
+  g.restore();
+
+  // --- cartoon bees waiting at the gaps ---
+  function cbee(x,y,s,flip){
+    g.save(); g.translate(x,y); g.scale(flip?-s:s,s);
+    g.strokeStyle=OUT; g.lineWidth=2.5/s;
+    // wings
+    g.fillStyle="rgba(230,245,255,0.8)";
+    g.beginPath(); g.ellipse(-2,-13,7,10,-0.5,0,7); g.fill(); g.stroke();
+    g.beginPath(); g.ellipse(7,-12,6,8,0.4,0,7); g.fill(); g.stroke();
+    // body
+    var bg3=g.createLinearGradient(0,-10,0,10);
+    bg3.addColorStop(0,"#ffe06a"); bg3.addColorStop(1,"#f0a800");
+    g.fillStyle=bg3;
+    g.beginPath(); g.ellipse(0,0,15,11,0,0,7); g.fill(); g.stroke();
+    // stripes (clipped)
+    g.save(); g.beginPath(); g.ellipse(0,0,15,11,0,0,7); g.clip();
+    g.fillStyle="#2a2a2a";
+    g.fillRect(-4,-12,6,24); g.fillRect(6,-12,6,24);
+    g.restore();
+    g.beginPath(); g.ellipse(0,0,15,11,0,0,7); g.stroke();
+    // stinger
+    g.fillStyle="#2a2a2a";
+    g.beginPath(); g.moveTo(14,-2); g.lineTo(21,0); g.lineTo(14,3); g.closePath(); g.fill();
+    // face
+    g.fillStyle="#ffffff"; g.beginPath(); g.arc(-8,-3,3.4,0,7); g.fill();
+    g.fillStyle="#2a1a08"; g.beginPath(); g.arc(-8.7,-3,1.8,0,7); g.fill();
+    g.strokeStyle="#2a1a08"; g.lineWidth=1.6/s;
+    g.beginPath(); g.arc(-9,2,3,0.4,2.2); g.stroke(); // little grin
+    g.restore();
+    // buzz trail
+    g.strokeStyle="rgba(58,42,18,0.35)"; g.lineWidth=1.8; g.setLineDash([4,5]);
+    g.beginPath(); g.moveTo(x+(flip?18:-18),y+6);
+    g.quadraticCurveTo(x+(flip?30:-30),y+14,x+(flip?24:-24),y+22); g.stroke();
+    g.setLineDash([]);
+  }
+  cbee(46,190,0.9,true); cbee(64,236,0.75,true);
+  cbee(470,88,0.85,false); cbee(526,74,0.7,false);
+  cbee(716,300,0.8,false); cbee(700,342,0.65,false);
+
+  // --- HUD ---
+  function panel(x,y,w,h){ g.fillStyle="rgba(10,10,16,0.75)"; rr(x,y,w,h,h/2); g.fill(); }
+  g.textBaseline="middle"; g.font="bold 19px 'Courier New',monospace";
+  panel(14,10,86,30); g.fillStyle="#ffffff"; g.fillText("LV 7",34,26);
+  panel(258,10,252,30);
+  g.fillStyle="#bcd6a0"; g.font="bold 14px 'Courier New',monospace"; g.fillText("INK",272,26);
+  g.fillStyle="#1d1d2a"; rr(310,17,186,16,8); g.fill();
+  var ig=g.createLinearGradient(310,0,496,0);
+  ig.addColorStop(0,"#ffe06a"); ig.addColorStop(1,"#f0a800");
+  g.fillStyle=ig; rr(312,19,100,12,6); g.fill();
+  panel(668,10,86,30); g.fillStyle="#ffffff"; g.font="bold 19px 'Courier New',monospace";
+  g.fillText("0:06",684,26);
+  // hint pill
+  panel(200,438,368,28); g.fillStyle="#ffe06a"; g.font="bold 15px 'Courier New',monospace";
+  g.fillText("draw a line — lift to start the bees",216,452);
+})();
+
+// ================= LEVEL SELECT =================
+(function(){
+  var g=document.getElementById("levels").getContext("2d");
+  meadow(g);
+  px(g,0,0,256,16,P.ui);
+  text(g,"CHOOSE LEVEL",84,4,P.uiText,9);
+  head(g,8,3,0); text(g,"change",34,6,P.uiMut,6);
+  var i;
+  for(i=0;i<24;i++){
+    var col=i%6, row=Math.floor(i/6);
+    var x=22+col*36, y=26+row*30;
+    var done=i<12, next=i===12;
+    px(g,x,y,26,20,done?P.open:(next?P.accent:P.lock));
+    px(g,x,y,26,2,done?P.openHi:(next?"#ffc07a":"#6a6a80"));
+    if(done||next) text(g,String(i+1),x+(i>=9?6:9),y+6,"#fff",9);
+    else { px(g,x+10,y+8,6,7,"#2a2a35"); px(g,x+11,y+5,4,4,"#2a2a35"); px(g,x+12,y+6,2,2,P.lock); }
+  }
+  text(g,"12 levels done - endless meadow ahead",40,148,"#2b2b6e",7);
+})();
+</script>
+</body>
+</html>

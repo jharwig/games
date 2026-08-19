@@ -1,7 +1,7 @@
 /* Service worker: makes the site available offline. */
 /* BUILD is stamped by the deploy workflow so each deploy gets a fresh cache. */
 var BUILD = "";
-var CACHE = "games-v3" + (BUILD ? "-" + BUILD : "");
+var CACHE = "games-v4" + (BUILD ? "-" + BUILD : "");
 
 /* Filled in by the deploy workflow with each built game's dist files
    (their filenames are content-hashed, so they can't be listed here). */
@@ -15,6 +15,8 @@ var PRECACHE = [
   "./ninja/",
   "./ninja/index.html",
   "./ninja/three.module.min.js",
+  "./beedraw/",
+  "./beedraw/index.html",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",

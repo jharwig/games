@@ -44,3 +44,22 @@ Ninja Adventure is a third-person 3D obstacle-course game in a bright cartoon lo
 - **Hold W / Up** — run (on touch, hold the left half of the screen)
 - **Space** — jump / grab / release (on touch, tap the right half of the screen)
 - **M** — mute / unmute the sound
+
+## Bee Draw
+
+**Designed by Priella**
+
+**Play:** https://jharwig.github.io/games/beedraw/
+
+Bee Draw is a puzzle game about one line. A swarm of bees tries to reach the animal you chose — a dog, a cat, a cow, a chicken, or a horse. You draw one line of ink to block them. When you lift your finger, the bees are released and they fly.
+
+- Keep the animal safe for 7 seconds to win the level.
+- You have a limited amount of ink, so each line must count.
+- The levels are endless and randomly generated from a seed. Each level is more difficult than the one before: more bees, less ink, ponds where you cannot draw, honey pots that lure the bees away, and fast bees.
+- Your progress is saved automatically in the browser.
+
+### Controls
+
+- **Draw** — hold one finger or the mouse button and move to make the line
+- **Lift the finger / release the button** — release the bees
+- **Tap the buttons** — change the level, change the animal, or mute the sound
