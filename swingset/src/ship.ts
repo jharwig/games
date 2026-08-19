@@ -33,6 +33,17 @@ const FLIGHT_MAX = 3.0;
 const TARGET_SCATTER = 1.5;
 const PLAYER_AIM_CHANCE = 0.7;
 
+// Trajectory indicator: every ball in flight draws a dotted arc to its
+// landing spot, marked with a pulsing ring. Dots behind the ball shrink away
+// so the remaining trail always shows the path still to come.
+const TRAJ_DOT_SPACING = 2.6; // metres of arc between dots
+const TRAJ_DOT_RADIUS = 0.13;
+const TRAJ_MAX_DOTS = 320; // shared cap across all balls in flight
+const TRAJ_FADE_TIME = 0.35; // seconds a dot takes to shrink once passed
+const TRAJ_COLOR = 0xe0863a; // muted danger orange
+
+const SCORCH_RADIUS = 2.4; // grass wiped out around a ground impact
+
 const SAIL_IN_SECONDS = 6;
 const SAIL_IN_OFFSET_X = -150; // comes out of the fog from the left
 const SAIL_IN_OFFSET_Z = -45; // ...and from deeper water
@@ -357,6 +368,10 @@ function disposeTree(root: THREE.Object3D): void {
 interface Ball extends BallInfo {
   mesh: THREE.Mesh;
   life: number;
+  age: number;
+  trajTimes: number[]; // flight time at which the ball reaches each dot
+  trajPts: THREE.Vector3[];
+  ring: THREE.Mesh | null; // landing ring, returned to its pool on free
 }
 
 type Phase = 'hidden' | 'sailIn' | 'anchored' | 'moving' | 'trek' | 'sinking' | 'sunk';
@@ -430,6 +445,46 @@ export function createShip(ctx: GameCtx): ShipApi {
   const balls: Ball[] = [];
   let nextBallId = 1;
 
+  // Trajectory indicator: one InstancedMesh of dots shared by every ball in
+  // flight (tiny spheres read as a dotted ink line and never shimmer the way
+  // a dashed line material does under a moving camera).
+  const trajGeo = new THREE.SphereGeometry(TRAJ_DOT_RADIUS, 8, 6);
+  const trajMat = noOutline(
+    new THREE.MeshBasicMaterial({
+      color: TRAJ_COLOR,
+      transparent: true,
+      opacity: 0.85,
+      depthWrite: false,
+    }),
+  );
+  const trajDots = new THREE.InstancedMesh(trajGeo, trajMat, TRAJ_MAX_DOTS);
+  trajDots.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  trajDots.frustumCulled = false;
+  trajDots.count = 0;
+  ctx.scene.add(trajDots);
+  const trajMat4 = new THREE.Matrix4();
+
+  // Landing rings (pooled; one per ball in flight).
+  const ringGeo = new THREE.RingGeometry(0.78, 1.05, 24);
+  ringGeo.rotateX(-Math.PI / 2);
+  const ringMat = noOutline(
+    new THREE.MeshBasicMaterial({
+      color: TRAJ_COLOR,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+    }),
+  );
+  const ringPool: THREE.Mesh[] = [];
+
+  function takeRing(): THREE.Mesh {
+    const m = ringPool.pop() ?? new THREE.Mesh(ringGeo, ringMat);
+    m.renderOrder = 1;
+    m.visible = true;
+    ctx.scene.add(m);
+    return m;
+  }
+
   function takeBallMesh(): THREE.Mesh {
     const m = ballPool.pop() ?? new THREE.Mesh(ballGeo, ballMat);
     m.castShadow = true;
@@ -441,6 +496,12 @@ export function createShip(ctx: GameCtx): ShipApi {
     b.mesh.visible = false;
     ctx.scene.remove(b.mesh);
     ballPool.push(b.mesh);
+    if (b.ring) {
+      b.ring.visible = false;
+      ctx.scene.remove(b.ring);
+      ringPool.push(b.ring);
+      b.ring = null;
+    }
   }
   function clearBalls(): void {
     for (const b of balls) freeBall(b);
@@ -820,7 +881,12 @@ export function createShip(ctx: GameCtx): ShipApi {
       ),
       mesh,
       life: BALL_MAX_LIFE,
+      age: 0,
+      trajTimes: [],
+      trajPts: [],
+      ring: null,
     };
+    computeTrajectory(ball);
     balls.push(ball);
 
     // Muzzle flash + smoke.
@@ -830,16 +896,71 @@ export function createShip(ctx: GameCtx): ShipApi {
     ctx.events.emit('cannonFire', { ball, targetSwing: c.targetSwing });
   }
 
+  /** Sample the ball's analytic arc: a dot every TRAJ_DOT_SPACING metres, and
+   *  the landing ring where the path first meets ground or water. Uses the
+   *  same surface rule as the collision code, so the indicator is honest. */
+  function computeTrajectory(b: Ball): void {
+    const step = 0.03;
+    let px = b.pos.x;
+    let py = b.pos.y;
+    let pz = b.pos.z;
+    let since = TRAJ_DOT_SPACING * 0.4; // first dot clears the muzzle smoke
+    for (let t = step; t < BALL_MAX_LIFE; t += step) {
+      const nx = b.pos.x + b.vel.x * t;
+      const ny = b.pos.y + b.vel.y * t - 0.5 * GRAVITY * t * t;
+      const nz = b.pos.z + b.vel.z * t;
+      since += Math.hypot(nx - px, ny - py, nz - pz);
+      px = nx;
+      py = ny;
+      pz = nz;
+      const groundY = nz > 0 ? ctx.world.groundHeightAt(nx, nz) : WATER_Y;
+      const surfaceY = Math.max(groundY, WATER_Y);
+      if (ny <= surfaceY + BALL_RADIUS) {
+        const ring = takeRing();
+        ring.position.set(nx, surfaceY + 0.05, nz);
+        b.ring = ring;
+        return;
+      }
+      if (since >= TRAJ_DOT_SPACING) {
+        since = 0;
+        b.trajTimes.push(t);
+        b.trajPts.push(new THREE.Vector3(nx, ny, nz));
+      }
+    }
+  }
+
+  /** Redraw the shared dot mesh and pulse the landing rings. Dots the ball
+   *  has already passed shrink away over TRAJ_FADE_TIME. */
+  function updateTrajectories(): void {
+    let n = 0;
+    for (const b of balls) {
+      for (let k = 0; k < b.trajTimes.length && n < TRAJ_MAX_DOTS; k++) {
+        const s = clamp(1 + (b.trajTimes[k] - b.age) / TRAJ_FADE_TIME, 0, 1);
+        if (s <= 0) continue;
+        const p = b.trajPts[k];
+        trajMat4.makeScale(s, s, s).setPosition(p.x, p.y, p.z);
+        trajDots.setMatrixAt(n++, trajMat4);
+      }
+      if (b.ring) b.ring.scale.setScalar(1 + Math.sin(clock * 9) * 0.12);
+    }
+    trajDots.count = n;
+    trajDots.instanceMatrix.needsUpdate = true;
+  }
+
   // --- ball simulation ------------------------------------------------------
 
   function groundBurst(at: THREE.Vector3): void {
-    debris.burst(at, 26, 6.5, 0.85, 0x6b4b2a, 4, 1);
-    smoke.burst(at, 12, 2.6, 1.4, 0xa89880, 1.4, 1);
+    // The blast tears the turf out: earth, sod clods, and uprooted grass.
+    debris.burst(at, 34, 7.5, 0.95, 0x6b4b2a, 5, 1);
+    debris.burst(at, 20, 6.5, 0.9, 0x4e7a2b, 4.5, 1.1);
+    debris.burst(at, 10, 5.5, 0.8, 0x38571f, 3.5, 1.3);
+    smoke.burst(at, 16, 3, 1.6, 0xa89880, 1.8, 1);
+    ctx.world.scorchGrassAt(at.x, at.z, SCORCH_RADIUS);
     const d = decals[decalCursor];
     decalLife[decalCursor] = 6;
     decalCursor = (decalCursor + 1) % decals.length;
     d.position.set(at.x, ctx.world.groundHeightAt(at.x, at.z) + 0.04, at.z);
-    d.scale.setScalar(1.4 + Math.random() * 0.6);
+    d.scale.setScalar(1.7 + Math.random() * 0.7);
     d.visible = true;
     (d.material as THREE.MeshBasicMaterial).opacity = 0.6;
   }
@@ -884,6 +1005,7 @@ export function createShip(ctx: GameCtx): ShipApi {
       b.pos.z += b.vel.z * dt;
       b.mesh.position.copy(b.pos);
       b.life -= dt;
+      b.age += dt;
 
       let hit: 'water' | 'ground' | 'swing' | 'player' | null = null;
       let hitSwing: SwingInfo | undefined;
@@ -1297,6 +1419,7 @@ export function createShip(ctx: GameCtx): ShipApi {
       updateCannons(dt);
       updateJamPuffs(dt);
       updateBalls(dt);
+      updateTrajectories();
       updateFx(dt);
     },
   };

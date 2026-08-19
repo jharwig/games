@@ -149,10 +149,12 @@ events.on('cannonImpact', (e) => {
       break;
     }
     case 'ground': {
-      // Blast radius: the ground is never safe.
-      events.emit('screenShake', { intensity: 0.5 });
-      ctx.player.cameraShake(0.35);
+      // Blast radius: the ground is never safe. The punch scales with how
+      // close the ball landed — a near miss should rattle the screen.
       const feet = p.position;
+      const punch = Math.max(0, 1 - feet.distanceTo(e.pos) / 30);
+      events.emit('screenShake', { intensity: 0.45 + 0.5 * punch });
+      ctx.player.cameraShake(0.3 + 0.55 * punch);
       // "The ground is never safe": climbing low or mid-bail near the
       // blast counts too — only real height above it protects you.
       const nearGround =

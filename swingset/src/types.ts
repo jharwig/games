@@ -220,6 +220,9 @@ export interface WorldApi {
   fellTree(tree: TreeInfo, cause: 'chainsaw' | 'heart'): void;
   /** A fallen tree was picked up to carry: remove its mesh from the ground. */
   removeFallenTree(tree: TreeInfo): void;
+  /** A blast bared the ground here: clear grass tufts within `radius` of
+   *  (x, z). Grass regrows on a new Run. */
+  scorchGrassAt(x: number, z: number, radius: number): void;
   /** Water position offshore from a Swingset where the Ship parks. */
   shipAnchorage(setIndex: number): { x: number; z: number };
   update(dt: number): void;

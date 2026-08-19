@@ -448,26 +448,43 @@ export function createWorld(ctx: GameCtx): WorldApi {
     return false;
   }
 
-  function plantTufts(points: Array<{ x: number; z: number }>, seed: number): void {
-    const r = rng(seed);
-    const mesh = new THREE.InstancedMesh(bladeGeo, grassMat, points.length);
+  interface TuftField {
+    mesh: THREE.InstancedMesh;
+    points: Array<{ x: number; z: number }>;
+    seed: number;
+  }
+  const tuftFields: TuftField[] = [];
+
+  /** (Re)compute every instance of a tuft field from its seed — used at
+   *  planting time and to regrow scorched patches on a new Run. */
+  function fillTuftField(f: TuftField): void {
+    const r = rng(f.seed);
     const mat4 = new THREE.Matrix4();
     const quat = new THREE.Quaternion();
     const pos = new THREE.Vector3();
     const scl = new THREE.Vector3();
     const col = new THREE.Color();
-    for (let i = 0; i < points.length; i++) {
-      const pt = points[i];
+    for (let i = 0; i < f.points.length; i++) {
+      const pt = f.points[i];
       pos.set(pt.x, landHeight(pt.x, pt.z), pt.z);
       quat.setFromAxisAngle(UP, r() * Math.PI * 2);
       const s = 0.7 + r() * 0.6;
       // squared draw: lots of short tufts, a scattering of knee-high ones
       const tall = r();
       scl.set(s, s * (0.5 + 1.5 * tall * tall), s);
-      mesh.setMatrixAt(i, mat4.compose(pos, quat, scl));
+      f.mesh.setMatrixAt(i, mat4.compose(pos, quat, scl));
       col.setHSL(0.26 + (r() - 0.5) * 0.04, 0.55 + r() * 0.2, 0.4 + r() * 0.12);
-      mesh.setColorAt(i, col);
+      f.mesh.setColorAt(i, col);
     }
+    f.mesh.instanceMatrix.needsUpdate = true;
+    if (f.mesh.instanceColor) f.mesh.instanceColor.needsUpdate = true;
+  }
+
+  function plantTufts(points: Array<{ x: number; z: number }>, seed: number): void {
+    const mesh = new THREE.InstancedMesh(bladeGeo, grassMat, points.length);
+    const f: TuftField = { mesh, points, seed };
+    fillTuftField(f);
+    tuftFields.push(f);
     mesh.computeBoundingSphere();
     mesh.receiveShadow = true;
     scene.add(mesh);
@@ -521,6 +538,20 @@ export function createWorld(ctx: GameCtx): WorldApi {
   const denseScl = new THREE.Vector3();
   const denseCol = new THREE.Color();
 
+  // Cannonball blasts bare the turf. Both grass systems consult this list;
+  // it is cleared (and the tufts regrown) on a new Run.
+  const scorches: Array<{ x: number; z: number; r: number }> = [];
+  const MAX_SCORCHES = 64;
+
+  function inScorched(x: number, z: number): boolean {
+    for (const s of scorches) {
+      const dx = x - s.x;
+      const dz = z - s.z;
+      if (dx * dx + dz * dz < s.r * s.r) return true;
+    }
+    return false;
+  }
+
   function updateDenseGrass(px: number, pz: number): void {
     const cx = Math.round(px / DENSE_CELL);
     const cz = Math.round(pz / DENSE_CELL);
@@ -533,7 +564,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
         const r = rng((Math.imul(ix, 73856093) ^ Math.imul(iz, 19349663)) >>> 0);
         const x = (ix + (r() - 0.5) * 0.9) * DENSE_CELL;
         const z = (iz + (r() - 0.5) * 0.9) * DENSE_CELL;
-        if (z < GRASS_MIN_Z || onWornPatch(x, z)) continue;
+        if (z < GRASS_MIN_Z || onWornPatch(x, z) || inScorched(x, z)) continue;
         densePos.set(x, landHeight(x, z), z);
         denseQuat.setFromAxisAngle(UP, r() * Math.PI * 2);
         const s = 0.55 + r() * 0.5; // finer undergrowth than the field accents
@@ -548,6 +579,33 @@ export function createWorld(ctx: GameCtx): WorldApi {
     denseMesh.count = n;
     denseMesh.instanceMatrix.needsUpdate = true;
     if (denseMesh.instanceColor) denseMesh.instanceColor.needsUpdate = true;
+  }
+
+  const scorchedTuft = new THREE.Matrix4().makeScale(0, 0, 0);
+
+  function scorchGrassAt(x: number, z: number, radius: number): void {
+    scorches.push({ x, z, r: radius });
+    if (scorches.length > MAX_SCORCHES) scorches.shift();
+    const r2 = radius * radius;
+    for (const f of tuftFields) {
+      let touched = false;
+      for (let i = 0; i < f.points.length; i++) {
+        const dx = f.points[i].x - x;
+        const dz = f.points[i].z - z;
+        if (dx * dx + dz * dz > r2) continue;
+        f.mesh.setMatrixAt(i, scorchedTuft);
+        touched = true;
+      }
+      if (touched) f.mesh.instanceMatrix.needsUpdate = true;
+    }
+    denseCX = Infinity; // rebuild the carpet window without the bared cells
+  }
+
+  function regrowGrass(): void {
+    if (scorches.length === 0) return;
+    scorches.length = 0;
+    for (const f of tuftFields) fillTuftField(f);
+    denseCX = Infinity;
   }
 
   // --- swingsets -----------------------------------------------------------
@@ -874,6 +932,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
   }
 
   function repairAllSwings(): void {
+    regrowGrass(); // a new Run also heals the battle-scarred turf
     for (const s of allSwings) {
       s.broken = false;
       s.angle = 0;
@@ -1066,6 +1125,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     syncHeartTrees,
     fellTree,
     removeFallenTree,
+    scorchGrassAt,
     shipAnchorage(setIndex: number): { x: number; z: number } {
       const spot = SWINGSET_POSITIONS[clamp(setIndex, 0, SWINGSET_POSITIONS.length - 1)];
       return { x: spot.x, z: ANCHORAGE_Z };
