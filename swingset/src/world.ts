@@ -360,25 +360,47 @@ export function createWorld(ctx: GameCtx): WorldApi {
   const bladeGeo = (() => {
     const r = rng(31337);
     const verts: number[] = [];
-    const BLADES = 5;
+    const tints: number[] = [];
+    const BLADES = 6;
     for (let b = 0; b < BLADES; b++) {
       const a = (b / BLADES) * Math.PI * 2 + r() * 1.1;
       const dx = Math.cos(a);
       const dz = Math.sin(a);
-      const bx = dx * (0.05 + r() * 0.1);
-      const bz = dz * (0.05 + r() * 0.1);
+      const bx = dx * (0.04 + r() * 0.09);
+      const bz = dz * (0.04 + r() * 0.09);
       const h = 0.26 + r() * 0.44;
-      const w = 0.05 + r() * 0.035;
+      const w = 0.028 + r() * 0.022;
       const lean = 0.1 + r() * 0.18;
-      // one tapered triangle per blade, tip leaning outward from the tuft
-      verts.push(
-        bx - dz * w, 0, bz + dx * w,
-        bx + dz * w, 0, bz - dx * w,
-        bx + dx * lean, h, bz + dz * lean,
-      );
+      // Each blade is a tapered strip with a knee: wide base quad, then a
+      // narrower tip triangle bent further outward — reads as a curved blade.
+      const midY = h * 0.55;
+      const midW = w * 0.55;
+      const midL = lean * 0.4;
+      const p = [
+        [bx - dz * w, 0, bz + dx * w],
+        [bx + dz * w, 0, bz - dx * w],
+        [bx + dx * midL + dz * midW, midY, bz + dz * midL - dx * midW],
+        [bx + dx * midL - dz * midW, midY, bz + dz * midL + dx * midW],
+        [bx + dx * lean, h, bz + dz * lean],
+      ];
+      // dark rooted base up to a bright, slightly yellowed tip
+      const t = [
+        [0.55, 0.55, 0.55],
+        [0.55, 0.55, 0.55],
+        [0.88, 0.88, 0.82],
+        [0.88, 0.88, 0.82],
+        [1.18, 1.22, 0.95],
+      ];
+      for (const tri of [[0, 1, 2], [0, 2, 3], [3, 2, 4]]) {
+        for (const vi of tri) {
+          verts.push(p[vi][0], p[vi][1], p[vi][2]);
+          tints.push(t[vi][0], t[vi][1], t[vi][2]);
+        }
+      }
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(tints, 3));
     // all normals point straight up so blades shade like the lawn under them
     const normals = new Float32Array(verts.length);
     for (let i = 0; i < normals.length; i += 3) normals[i + 1] = 1;
@@ -386,22 +408,35 @@ export function createWorld(ctx: GameCtx): WorldApi {
     return geo;
   })();
 
-  const grassMat = noOutline(toonMat({ side: THREE.DoubleSide }));
-  grassMat.onBeforeCompile = (shader) => {
-    shader.uniforms.uTime = animTime;
-    shader.vertexShader = shader.vertexShader
-      .replace('void main() {', 'uniform float uTime;\nvoid main() {')
-      .replace(
-        '#include <begin_vertex>',
-        `#include <begin_vertex>
-        // Phase from the tuft's translation keeps gusts spatially coherent;
-        // the bend is pre-instance-rotation, so its direction varies per tuft.
-        vec3 tuft = instanceMatrix[3].xyz;
-        float wp = uTime * 1.8 + tuft.x * 0.24 + tuft.z * 0.19;
-        float wind = sin(wp) + 0.45 * sin(wp * 2.17 + 1.4);
-        transformed.xz += wind * vec2(0.14, 0.06) * position.y;`,
-      );
-  };
+  /** Toon grass material with GPU wind. `nearFade` additionally shrinks tufts
+   *  to nothing past ~12 m from the camera (for the dense carpet, whose window
+   *  edge must dissolve into the baked far field instead of ending in a line). */
+  function makeGrassMat(nearFade: boolean): THREE.MeshToonMaterial {
+    const mat = noOutline(toonMat({ side: THREE.DoubleSide, vertexColors: true }));
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = animTime;
+      shader.vertexShader = shader.vertexShader
+        .replace('void main() {', 'uniform float uTime;\nvoid main() {')
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          // Phase from the tuft's translation keeps gusts spatially coherent;
+          // the bend is pre-instance-rotation, so its direction varies per tuft.
+          vec3 tuft = instanceMatrix[3].xyz;
+          float wp = uTime * 1.8 + tuft.x * 0.24 + tuft.z * 0.19;
+          float wind = sin(wp) + 0.45 * sin(wp * 2.17 + 1.4);
+          transformed.xz += wind * vec2(0.14, 0.06) * position.y;` +
+            (nearFade
+              ? `
+          transformed *= 1.0 - smoothstep(9.0, 12.5, distance(tuft, cameraPosition));`
+              : ''),
+        );
+    };
+    // wind-only and wind+fade variants must not share a compiled program
+    mat.customProgramCacheKey = () => `grass-wind-${nearFade ? 'fade' : 'far'}`;
+    return mat;
+  }
+  const grassMat = makeGrassMat(false);
 
   /** Tufts never grow on the worn dirt under a swingset's seats. */
   function onWornPatch(x: number, z: number): boolean {
@@ -461,6 +496,58 @@ export function createWorld(ctx: GameCtx): WorldApi {
       if (!onWornPatch(x, z)) pts.push({ x, z });
     }
     plantTufts(pts, 104729);
+  }
+
+  // Dense carpet that follows the player: a grid-snapped window of instances.
+  // Each grid cell hashes to a stable tuft (jitter, size, colour), so
+  // recentring the window never makes the grass swim — tufts simply appear
+  // at fixed world spots. Rebuilt only when the player crosses a few cells,
+  // and the shader fades tufts out before the window edge so the carpet
+  // dissolves into the baked far field.
+  const DENSE_CELL = 0.5; // metres per tuft cell
+  const DENSE_N = 24; // cells each side of centre → ~12 m radius
+  const DENSE_RESNAP = 3; // rebuild after crossing this many cells
+
+  const denseMesh = new THREE.InstancedMesh(bladeGeo, makeGrassMat(true), (2 * DENSE_N + 1) ** 2);
+  denseMesh.frustumCulled = false; // always wrapped around the camera anyway
+  denseMesh.receiveShadow = true;
+  scene.add(denseMesh);
+  let denseCX = Infinity;
+  let denseCZ = Infinity;
+
+  const denseMat4 = new THREE.Matrix4();
+  const denseQuat = new THREE.Quaternion();
+  const densePos = new THREE.Vector3();
+  const denseScl = new THREE.Vector3();
+  const denseCol = new THREE.Color();
+
+  function updateDenseGrass(px: number, pz: number): void {
+    const cx = Math.round(px / DENSE_CELL);
+    const cz = Math.round(pz / DENSE_CELL);
+    if (Math.abs(cx - denseCX) < DENSE_RESNAP && Math.abs(cz - denseCZ) < DENSE_RESNAP) return;
+    denseCX = cx;
+    denseCZ = cz;
+    let n = 0;
+    for (let ix = cx - DENSE_N; ix <= cx + DENSE_N; ix++) {
+      for (let iz = cz - DENSE_N; iz <= cz + DENSE_N; iz++) {
+        const r = rng((Math.imul(ix, 73856093) ^ Math.imul(iz, 19349663)) >>> 0);
+        const x = (ix + (r() - 0.5) * 0.9) * DENSE_CELL;
+        const z = (iz + (r() - 0.5) * 0.9) * DENSE_CELL;
+        if (z < GRASS_MIN_Z || onWornPatch(x, z)) continue;
+        densePos.set(x, landHeight(x, z), z);
+        denseQuat.setFromAxisAngle(UP, r() * Math.PI * 2);
+        const s = 0.55 + r() * 0.5; // finer undergrowth than the field accents
+        const tall = r();
+        denseScl.set(s, s * (0.55 + 1.3 * tall * tall), s);
+        denseMesh.setMatrixAt(n, denseMat4.compose(densePos, denseQuat, denseScl));
+        denseCol.setHSL(0.26 + (r() - 0.5) * 0.04, 0.55 + r() * 0.2, 0.4 + r() * 0.12);
+        denseMesh.setColorAt(n, denseCol);
+        n++;
+      }
+    }
+    denseMesh.count = n;
+    denseMesh.instanceMatrix.needsUpdate = true;
+    if (denseMesh.instanceColor) denseMesh.instanceColor.needsUpdate = true;
   }
 
   // --- swingsets -----------------------------------------------------------
@@ -960,6 +1047,7 @@ export function createWorld(ctx: GameCtx): WorldApi {
     const focus = ctx.player ? ctx.player.position : null;
     const fx = focus ? focus.x : 0;
     const fz = focus ? focus.z : SWINGSET_POSITIONS[0].z;
+    updateDenseGrass(fx, fz);
     sun.target.position.set(fx, 0, fz);
     sun.position.set(fx + sunOffset.x, sunOffset.y, fz + sunOffset.z);
   }
