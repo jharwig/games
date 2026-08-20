@@ -137,7 +137,7 @@ Circle the Wagons is a first-person shooting gallery on a golden-hour prairie. Y
 - **R** — reload
 - **Q**, or **1** / **2** — swap between the rifle and the six-shooter
 - **Left / Right arrows** or **A** / **D** — also turn
-- **On touch screens** — drag to look, and use the **FIRE** and **SWAP** buttons; a toggle lets you steer by tilting the phone (gyroscope) instead
+- **On touch screens** — drag to look, and use the **FIRE** and **SWAP** buttons. On first start it offers gyro aiming: the phone is the gun — turn it to look around (dragging nudges your aim); the **Gyro** toggle switches it later
 
 ### Credits
 

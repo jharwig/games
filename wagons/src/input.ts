@@ -1,9 +1,10 @@
 // Keyboard + mouse (pointer lock), touch (drag to look + buttons), and the
 // optional phone gyroscope. Produces look deltas and edge/held flags that
 // main.ts consumes every frame.
+import * as THREE from 'three';
 import { canvas } from './gfx';
-import { GYRO_KEY, MOUSE_SENS, TOUCH_SENS } from './constants';
-import { isTouch, loadStr, saveStr } from './util';
+import { GYRO_KEY, GYRO_SMOOTH, GYRO_YAW_GAIN, MOUSE_SENS, PITCH_LIMIT, TOUCH_SENS } from './constants';
+import { angDiff, clamp, isTouch, loadStr, saveStr } from './util';
 
 export const input = {
   dYaw: 0, dPitch: 0,         // accumulated look delta, consumed per frame
@@ -14,6 +15,7 @@ export const input = {
   locked: false,
   touch: isTouch(),
   gyro: false,
+  gyroBlocked: false,         // the OS refused orientation access
 };
 
 export function consume() {
@@ -97,30 +99,77 @@ if (input.touch) {
 }
 
 // ---- gyroscope (opt-in) ----
-let lastAlpha: number | null = null, lastBeta: number | null = null;
+// Aim by turning the phone: the phone IS the gun. deviceorientation's
+// alpha/beta/gamma are Z-X'-Y'' Euler angles; differencing them directly
+// falls apart exactly where you hold a phone to aim (upright, beta ~ 90
+// degrees is a gimbal singularity) and means nothing in landscape. So build
+// the device quaternion the way three's DeviceOrientationControls did, turn
+// it into the direction the BACK of the phone points and read that
+// direction's yaw/pitch. (Screen rotation only rolls about the view axis, so
+// portrait and landscape come out the same.)
+//
+// The mapping is absolute + calibrated: view = phone * gain + offset, where
+// the offset is captured at enable and at every run start (so wherever the
+// phone points then = wherever the view looks then). Dragging rotates the
+// offset, which is how you aim behind you from a couch and how you shrug off
+// drift. A light exponential smoothing takes the sensor shimmer off the
+// crosshair.
+const D2R = Math.PI / 180;
+const gEuler = new THREE.Euler(), gQuat = new THREE.Quaternion(), gFwd = new THREE.Vector3();
+const Q_BACK = new THREE.Quaternion(-Math.SQRT1_2, 0, 0, Math.SQRT1_2); // look out the back of the device
+const phone = { yaw: 0, pitch: 0 };   // smoothed direction the phone points (three yaw convention)
+const offset = { yaw: 0, pitch: 0 };  // view = phone*gain + offset
+let gHave = false;                    // at least one reading since enabling
+let pendingCal: { yaw: number; pitch: number } | null = null;
+const dbg = new URLSearchParams(location.search).has('debug') ? document.getElementById('dbg') : null;
+if (dbg) dbg.classList.remove('hidden');
+
 function onOrient(e: DeviceOrientationEvent) {
-  if (!input.gyro || e.alpha === null || e.beta === null) return;
-  if (lastAlpha !== null && lastBeta !== null) {
-    let da = e.alpha - lastAlpha; if (da > 180) da -= 360; if (da < -180) da += 360;
-    const db = e.beta - lastBeta;
-    // portrait: alpha is compass yaw; turning the phone left increases alpha
-    input.dYaw += da * Math.PI / 180;
-    input.dPitch += db * Math.PI / 180 * (window.innerWidth > window.innerHeight ? 0 : 1);
-  }
-  lastAlpha = e.alpha; lastBeta = e.beta;
+  if (!input.gyro || e.alpha === null || e.beta === null || e.gamma === null) return;
+  gEuler.set(e.beta * D2R, e.alpha * D2R, -e.gamma * D2R, 'YXZ');
+  gQuat.setFromEuler(gEuler).multiply(Q_BACK);
+  gFwd.set(0, 0, -1).applyQuaternion(gQuat);
+  const y = Math.atan2(-gFwd.x, -gFwd.z);                 // three's yaw convention (rotation.y)
+  const p = Math.asin(clamp(gFwd.y, -1, 1));
+  if (!gHave) { phone.yaw = y; phone.pitch = p; gHave = true; }
+  else { phone.yaw += angDiff(phone.yaw, y) * GYRO_SMOOTH; phone.pitch += (p - phone.pitch) * GYRO_SMOOTH; }
+  if (pendingCal) { calibrateGyro(pendingCal.yaw, pendingCal.pitch); pendingCal = null; }
+  if (dbg) dbg.textContent = `α ${e.alpha.toFixed(0)} β ${e.beta.toFixed(0)} γ ${e.gamma.toFixed(0)}\nphone yaw ${(phone.yaw / D2R).toFixed(0)} pitch ${(phone.pitch / D2R).toFixed(0)}\nscreen ${(screen as any).orientation?.type ?? '?'}`;
+}
+/** Make the phone's current direction correspond to this view yaw/pitch. */
+export function calibrateGyro(viewYaw: number, viewPitch: number) {
+  if (!input.gyro) return;
+  if (!gHave) { pendingCal = { yaw: viewYaw, pitch: viewPitch }; return; }
+  offset.yaw = viewYaw - phone.yaw * GYRO_YAW_GAIN;
+  offset.pitch = viewPitch - phone.pitch;
+}
+/** The absolute look the phone asks for, or null when gyro is off / has no
+ *  reading yet. Drag deltas rotate the offset; the pitch offset can't be
+ *  dragged past what PITCH_LIMIT allows at the current tilt, so holding a
+ *  drag at the top never winds up an invisible surplus. */
+export function gyroLook(dYaw: number, dPitch: number): { yaw: number; pitch: number } | null {
+  if (!input.gyro || !gHave) return null;
+  offset.yaw += dYaw;
+  offset.pitch = clamp(offset.pitch + dPitch, -PITCH_LIMIT - phone.pitch, PITCH_LIMIT - phone.pitch);
+  return { yaw: phone.yaw * GYRO_YAW_GAIN + offset.yaw, pitch: phone.pitch + offset.pitch };
 }
 export const gyroAvailable = () => typeof DeviceOrientationEvent !== 'undefined' && input.touch;
+/** Turn the gyro on (asks iOS for permission — must run inside a user
+ *  gesture) or off. Resolves to whether it's on; `input.gyroBlocked` is set
+ *  when the OS refused. */
 export async function setGyro(on: boolean): Promise<boolean> {
   if (!on) { input.gyro = false; saveStr(GYRO_KEY, '0'); window.removeEventListener('deviceorientation', onOrient); return false; }
   try {
     const D = DeviceOrientationEvent as any;
     if (typeof D.requestPermission === 'function') {
-      const r = await D.requestPermission(); if (r !== 'granted') return false;
+      const r = await D.requestPermission();
+      if (r !== 'granted') { input.gyroBlocked = true; saveStr(GYRO_KEY, '0'); return false; }
     }
-    lastAlpha = lastBeta = null;
+    gHave = false; pendingCal = null;
     window.addEventListener('deviceorientation', onOrient);
-    input.gyro = true; saveStr(GYRO_KEY, '1');
+    input.gyro = true; input.gyroBlocked = false; saveStr(GYRO_KEY, '1');
     return true;
-  } catch { return false; }
+  } catch { input.gyroBlocked = true; return false; }
 }
-export const gyroWanted = () => loadStr(GYRO_KEY, '0') === '1';
+/** Remembered choice: 'on' | 'off' | null when never asked. */
+export function gyroPref(): 'on' | 'off' | null { const v = loadStr(GYRO_KEY, ''); return v === '1' ? 'on' : v === '0' ? 'off' : null; }

@@ -6,11 +6,11 @@ import { buildRing } from './ring';
 import { initPhysics, stepPhysics } from './ragdoll';
 import { activeRiderCount, assistTarget, clearRiders, fellRider, initRiders, riders, shootRay, spawnRider, updateRiders, type Rider } from './riders';
 import { feedSway, gun, gunEvents, gunRandomSpread, initGuns, startReload, swapGun, tryFire, updateGuns } from './guns';
-import { consume, exitLock, gyroAvailable, gyroWanted, input, requestLock, setGyro } from './input';
+import { calibrateGyro, consume, exitLock, gyroAvailable, gyroLook, gyroPref, input, requestLock, setGyro } from './input';
 import { dust, updateParticles } from './particles';
 import { audio, type LoopHandle } from './audio';
 import * as ui from './ui';
-import { AIM_ASSIST, BEST_KEY, BREATHER_TIME, HEARTS, KEY_TURN_SPEED, PITCH_LIMIT, State, raidParams } from './constants';
+import { AIM_ASSIST, BEST_KEY, BREATHER_TIME, GYRO_KEY, GYRO_SWAY, HEARTS, KEY_TURN_SPEED, PITCH_LIMIT, State, raidParams } from './constants';
 import { angDiff, clamp, loadStr, saveStr, rand } from './util';
 
 // ------------------------------------------------------------ game state
@@ -63,6 +63,7 @@ function startRun() {
   hearts = HEARTS; score = 0; streak = 0; raidNo = 0;
   ui.showHud(); ui.setHearts(hearts); ui.setScore(score, streak);
   pitch.value = 0;
+  calibrateGyro(yaw.value, 0); // wherever the phone points now is where the run starts looking
   state = State.PLAYING;
   hadLock = false; paused = false;
   requestLock();
@@ -145,7 +146,13 @@ function handleInput(dt: number) {
   let dy = input.dYaw, dp = input.dPitch;
   if (input.turnLeft) dy += KEY_TURN_SPEED * dt;
   if (input.turnRight) dy -= KEY_TURN_SPEED * dt;
-  if (dy || dp) {
+  const g = gyroLook(dy, dp);
+  if (g) {
+    // the phone is the gun: drag has already rotated the offset inside gyroLook
+    const ty = angDiff(yaw.value, g.yaw), tp = clamp(g.pitch, -PITCH_LIMIT, PITCH_LIMIT) - pitch.value;
+    yaw.value += ty; pitch.value += tp;
+    feedSway(dy + (ty - dy) * GYRO_SWAY, dp + (tp - dp) * GYRO_SWAY);
+  } else if (dy || dp) {
     yaw.value += dy;
     pitch.value = clamp(pitch.value + dp, -PITCH_LIMIT, PITCH_LIMIT);
     feedSway(dy, dp);
@@ -232,12 +239,23 @@ async function boot() {
   ui.showControls(input.touch);
   ui.setMuteLabel(audio.muted);
   ui.el.btnMute.addEventListener('click', () => { audio.init(); audio.setMuted(!audio.muted); ui.setMuteLabel(audio.muted); });
+  // Gyro aiming: needs a gesture on iOS, so it's enabled from taps — the
+  // toggle, or the one-time "aim by turning your phone?" card on first start.
+  const enableGyro = async () => { const on = await setGyro(true); if (on) calibrateGyro(yaw.value, pitch.value); ui.setGyroLabel(on, input.gyroBlocked); return on; };
   if (gyroAvailable()) {
     ui.showGyroButton();
-    ui.el.btnGyro.addEventListener('click', async () => { const on = await setGyro(!input.gyro); ui.setGyroLabel(on); });
-    if (gyroWanted()) { /* needs a gesture on iOS; enabled on first start click below */ }
+    ui.el.btnGyro.addEventListener('click', async () => { if (input.gyro) { await setGyro(false); ui.setGyroLabel(false, false); } else await enableGyro(); });
   }
-  ui.el.btnStart.addEventListener('click', async () => { if (gyroAvailable() && gyroWanted() && !input.gyro) ui.setGyroLabel(await setGyro(true)); startRun(); });
+  ui.el.btnStart.addEventListener('click', async () => {
+    if (gyroAvailable() && !input.gyro) {
+      const pref = gyroPref();
+      if (pref === null) { ui.el.gyroAsk.classList.remove('hidden'); return; }
+      if (pref === 'on') await enableGyro();
+    }
+    startRun();
+  });
+  ui.el.btnGyroYes.addEventListener('click', async () => { ui.el.gyroAsk.classList.add('hidden'); await enableGyro(); startRun(); });
+  ui.el.btnGyroNo.addEventListener('click', () => { ui.el.gyroAsk.classList.add('hidden'); saveStr(GYRO_KEY, '0'); startRun(); });
   ui.el.btnAgain.addEventListener('click', startRun);
   ui.el.btnMenu.addEventListener('click', showTitle);
   ui.el.btnCredits.addEventListener('click', () => ui.el.credits.classList.remove('hidden'));

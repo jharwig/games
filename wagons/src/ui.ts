@@ -9,7 +9,8 @@ export const el = {
   weaponName: $('weaponName'), rounds: $('rounds'), weaponHint: $('weaponHint'), crosshair: $('crosshair'),
   banner: $('banner'), flash: $('flash'),
   title: $('title'), best: $('best'), loading: $('loading'), loadBar: $('loadBar').firstElementChild as HTMLElement,
-  startRow: $('startRow'), btnStart: $('btnStart'), btnCredits: $('btnCredits'), btnMute: $('btnMute'), btnGyro: $('btnGyro'),
+  startRow: $('startRow'), btnStart: $('btnStart'), btnCredits: $('btnCredits'), btnMute: $('btnMute'), btnGyro: $('btnGyro'), toggles: $('toggles'),
+  gyroAsk: $('gyroAsk'), btnGyroYes: $('btnGyroYes'), btnGyroNo: $('btnGyroNo'),
   over: $('over'), overScore: $('overScore'), overBest: $('overBest'), btnAgain: $('btnAgain'), btnMenu: $('btnMenu'),
   credits: $('credits'), creditList: $('creditList'), btnCreditsClose: $('btnCreditsClose'),
 };
@@ -18,12 +19,12 @@ export function setLoading(p: number) { el.loadBar.style.width = `${Math.round(p
 export function loadingDone() { el.loading.classList.add('hidden'); el.startRow.classList.remove('hidden'); }
 
 export function showTitle(best: number) {
-  el.title.classList.remove('hidden'); el.over.classList.add('hidden'); el.hud.classList.add('hidden');
+  el.title.classList.remove('hidden'); el.over.classList.add('hidden'); el.hud.classList.add('hidden'); el.toggles.classList.remove('hidden');
   el.best.textContent = best > 0 ? `Best: ${best}` : '';
 }
-export function showHud() { el.title.classList.add('hidden'); el.over.classList.add('hidden'); el.hud.classList.remove('hidden'); }
+export function showHud() { el.title.classList.add('hidden'); el.over.classList.add('hidden'); el.hud.classList.remove('hidden'); el.toggles.classList.add('hidden'); }
 export function showOver(score: number, best: number, isNew: boolean) {
-  el.over.classList.remove('hidden');
+  el.over.classList.remove('hidden'); el.toggles.classList.remove('hidden');
   el.overScore.textContent = `Riders downed: ${score}`;
   el.overBest.textContent = isNew ? `New best! ${best}` : `Best: ${best}`;
 }
@@ -71,7 +72,7 @@ export function fillCredits() {
   el.creditList.innerHTML = CREDITS.map(c => `<li><a href="${c.url}" target="_blank" rel="noopener">${c.title}</a> by ${c.author} — ${c.license}</li>`).join('');
 }
 export function setMuteLabel(muted: boolean) { el.btnMute.textContent = muted ? 'Sound: off' : 'Sound: on'; }
-export function setGyroLabel(on: boolean) { el.btnGyro.textContent = on ? 'Gyro: on' : 'Gyro: off'; }
+export function setGyroLabel(on: boolean, blocked = false) { el.btnGyro.textContent = on ? 'Gyro: on' : blocked ? 'Gyro: blocked' : 'Gyro: off'; }
 export function showGyroButton() { el.btnGyro.classList.remove('hidden'); }
 export function showControls(touch: boolean) {
   document.querySelector('#controls .desk')!.classList.toggle('hidden', touch);

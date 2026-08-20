@@ -17,6 +17,9 @@ export const PITCH_LIMIT = 0.62;       // radians up/down
 export const MOUSE_SENS = 0.0022;
 export const TOUCH_SENS = 0.0045;
 export const KEY_TURN_SPEED = 2.2;     // rad/s with A/D or arrows
+export const GYRO_YAW_GAIN = 1;        // phone turn -> view turn (1 = the phone IS the gun)
+export const GYRO_SMOOTH = 0.35;       // per-reading exponential smoothing of the phone direction
+export const GYRO_SWAY = 0.4;          // how much gyro-driven look feeds the gun sway (drag feeds 1.0)
 
 // ---- guns ----
 export const RIFLE_LEVER_TIME = 0.55;  // lever cycle after each shot

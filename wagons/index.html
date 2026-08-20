@@ -124,8 +124,16 @@
   #loadBar { width: min(360px, 80vw); height: 8px; background: rgba(244,227,194,0.2); border-radius: 4px; overflow: hidden; margin: 10px auto; }
   #loadBar i { display: block; height: 100%; width: 0; background: #ffd27a; transition: width 0.2s; }
   #controls { font-size: 14px; opacity: 0.8; max-width: 520px; line-height: 1.5; margin-top: 18px; }
-  #toggles { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 10px); right: calc(env(safe-area-inset-right, 0px) + 10px); display: flex; gap: 8px; }
+  #toggles { position: fixed; z-index: 15; top: calc(env(safe-area-inset-top, 0px) + 10px); right: calc(env(safe-area-inset-right, 0px) + 10px); display: flex; gap: 8px; }
   #toggles button { font-size: 14px; padding: 8px 12px; }
+  #gyroAsk {
+    position: fixed; inset: 0; z-index: 20; background: rgba(20,12,6,0.85);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+  }
+  #gyroAsk .card { max-width: 420px; text-align: center; background: rgba(20,12,6,0.9); border: 1px solid rgba(244,227,194,0.3); border-radius: 8px; padding: 20px 22px; }
+  #gyroAsk h2 { color: #ffd27a; letter-spacing: 1px; margin: 0 0 10px; }
+  #gyroAsk p { font-size: 15px; line-height: 1.5; opacity: 0.9; }
+  #dbg { position: fixed; left: 8px; bottom: 8px; z-index: 30; margin: 0; font: 12px/1.4 monospace; color: #ffd27a; background: rgba(0,0,0,0.5); padding: 4px 6px; pointer-events: none; white-space: pre; }
   #credits {
     position: fixed; inset: 0; z-index: 20; background: rgba(20,12,6,0.92); overflow: auto; padding: 30px 20px;
   }
@@ -161,11 +169,13 @@
   </div>
 </div>
 
+<div id="toggles">
+  <button class="btn secondary" id="btnMute">Sound: on</button>
+  <button class="btn secondary hidden" id="btnGyro">Gyro: off</button>
+</div>
+<pre id="dbg" class="hidden"></pre>
+
 <div id="title">
-  <div id="toggles">
-    <button class="btn secondary" id="btnMute">Sound: on</button>
-    <button class="btn secondary hidden" id="btnGyro">Gyro: off</button>
-  </div>
   <h1>Circle the Wagons</h1>
   <div class="sub">Designed by Jeff</div>
   <div class="big" id="best"></div>
@@ -176,7 +186,7 @@
   </div>
   <div id="controls">
     <span class="desk">Click to lock the mouse. Mouse aims, left click fires, <b>R</b> reloads, <b>Q</b> swaps Rifle / Six-shooter. A / D also turn. Esc releases.</span>
-    <span class="mob hidden">Drag to look. FIRE shoots, SWAP changes gun, RELOAD reloads.</span>
+    <span class="mob hidden">Drag to look — or turn <b>Gyro</b> on (top right) and aim by turning the phone. FIRE shoots, SWAP changes gun, RELOAD reloads.</span>
   </div>
 </div>
 
@@ -185,6 +195,14 @@
   <div class="big" id="overScore"></div>
   <div class="big" id="overBest"></div>
   <div class="row"><button class="btn" id="btnAgain">Stand again</button><button class="btn secondary" id="btnMenu">Title</button></div>
+</div>
+
+<div id="gyroAsk" class="hidden">
+  <div class="card">
+    <h2>Aim by turning your phone?</h2>
+    <p>Hold the phone like a rifle and turn to look around — the phone is the gun. Dragging still nudges your aim. You can change this any time with the Gyro button.</p>
+    <div class="row"><button class="btn" id="btnGyroYes">Yes</button><button class="btn secondary" id="btnGyroNo">Not now</button></div>
+  </div>
 </div>
 
 <div id="credits" class="hidden">
