@@ -110,3 +110,35 @@ Pirates of the Swingset is a third-person 3D game set on a ring of four small is
 - **On touch screens** — a virtual joystick in the lower left replaces the arrows: touch anywhere in that corner and tilt. Bailing off a swing or grabbing a zip line takes a firm sideways tilt.
 - **M** — mute / unmute the sea shanty
 - Pick the boy or the girl on the title screen; you can switch after every sunken ship.
+
+## Circle the Wagons
+
+**Designed by Jeff**
+
+**Play:** https://jharwig.github.io/games/wagons/
+
+Circle the Wagons is a first-person shooting gallery on a golden-hour prairie. You stand in the middle of a ring of eight stagecoaches and turn freely through 360°, shooting the riders who gallop around the outside of the ring before they shoot you.
+
+- You never move from the centre of the ring. Turning, aiming and reloading are all you have.
+- Riders circle at their own speed and radius — some the other way round, later ones hanging off the far side of the horse so they are hard to hit. The stagecoaches are their cover: a rider passing behind one is briefly hidden, so you shoot through the gaps and over the roofs.
+- Horses cannot be hurt. A shot that hits the horse is a miss.
+- Before a rider shoots he aims: he turns in the saddle and raises his gun for about a second, with a sound and a visible cue. Drop him during his aim and the shot never comes.
+- A rider you hit falls off his horse as a physics ragdoll — every fall is different, his hat flies off, and the horse gallops away out of the ring. No blood.
+- You have five hearts. Every shot that lands on you costs one, and you cannot dodge. Clear all the riders in a raid and your hearts refill, a short breather follows, and the next raid is bigger, faster and more aggressive.
+- Two guns, both with infinite ammo — reload time is the only cost. The **rifle** is one accurate, powerful shot and then a lever cycle; the **six-shooter** is six fast shots and then a spin-reload. Swap whenever you like.
+- Consecutive riders dropped without a missed shot build a streak, which multiplies your score. Your best score is saved in the browser.
+- The game is endless: losing your last heart is the only way a run ends.
+
+### Controls
+
+- **Click the game** — lock the mouse and start playing (**Esc** releases it)
+- **Move the mouse** — look and aim
+- **Left click** — fire
+- **R** — reload
+- **Q**, or **1** / **2** — swap between the rifle and the six-shooter
+- **Left / Right arrows** or **A** / **D** — also turn
+- **On touch screens** — drag to look, and use the **FIRE** and **SWAP** buttons; a toggle lets you steer by tilting the phone (gyroscope) instead
+
+### Credits
+
+Circle the Wagons uses third-party CC-BY and CC0 art and audio. Every asset and its author are listed in [`wagons/CREDITS.md`](wagons/CREDITS.md).

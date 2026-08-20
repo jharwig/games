@@ -46,7 +46,13 @@ self.addEventListener("activate", function (event) {
 self.addEventListener("fetch", function (event) {
   var request = event.request;
   if (request.method !== "GET") return;
-  if (new URL(request.url).origin !== self.location.origin) return;
+  var url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // A game's media/ directory holds large, on-demand assets (models, audio,
+  // video). The deploy workflow keeps them out of the precache; keep them out
+  // of the runtime cache too, so they can never fill up the storage quota.
+  if (url.pathname.indexOf("/media/") !== -1) return;
 
   // Network first for pages, so updates arrive when online.
   // Cache fallback keeps the site available offline.

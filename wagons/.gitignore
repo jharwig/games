@@ -1,0 +1,6 @@
+node_modules/
+dist/
+*.local
+.DS_Store
+# raw downloads (login-gated originals); processed output goes to public/media
+raw/

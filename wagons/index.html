@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Circle the Wagons</title>
+<meta name="theme-color" content="#d98b3d">
+<script>
+// the shared manifest/icons live at the site root; add the links at runtime
+// so Vite does not rebase them into per-app hashed copies
+[
+  ["manifest", "../manifest.webmanifest", null],
+  ["icon", "../icons/icon.svg", "image/svg+xml"],
+  ["icon", "../icons/icon-192.png", "image/png"],
+  ["apple-touch-icon", "../icons/apple-touch-icon.png", null]
+].forEach(function (l) {
+  var el = document.createElement("link");
+  el.rel = l[0];
+  el.href = l[1];
+  if (l[2]) el.type = l[2];
+  document.head.appendChild(el);
+});
+</script>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    background: #2a1c12; overflow: hidden; overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent; -webkit-user-select: none; user-select: none;
+    touch-action: none;
+  }
+  body { font-family: "Georgia", "Times New Roman", serif; color: #f4e3c2; }
+  canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+  .hidden { display: none !important; }
+
+  /* ------------ HUD ------------ */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+  #hudTop {
+    position: absolute; left: 0; right: 0;
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+    padding: 0 calc(env(safe-area-inset-right, 0px) + 14px) 0 calc(env(safe-area-inset-left, 0px) + 14px);
+    display: flex; justify-content: space-between; align-items: flex-start;
+  }
+  .panel {
+    background: rgba(20, 12, 6, 0.55); border: 1px solid rgba(244, 227, 194, 0.25);
+    border-radius: 6px; padding: 6px 10px; backdrop-filter: blur(3px);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6); font-size: 16px; line-height: 1.3;
+  }
+  #hearts { font-size: 22px; letter-spacing: 2px; color: #e8433a; }
+  #hearts .lost { color: rgba(244,227,194,0.25); }
+  #score { text-align: right; }
+  #score b { font-size: 22px; }
+  #streak { color: #ffd27a; font-size: 14px; min-height: 18px; }
+  #weapon {
+    position: absolute; right: calc(env(safe-area-inset-right, 0px) + 14px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); text-align: right;
+  }
+  #weapon .rounds { letter-spacing: 3px; font-size: 18px; color: #ffd27a; }
+  #weapon .rounds .spent { color: rgba(244,227,194,0.25); }
+  #weapon .hint { font-size: 12px; opacity: 0.7; }
+  #raidTag {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: calc(env(safe-area-inset-top, 0px) + 10px);
+  }
+  #crosshair {
+    position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    opacity: 0.9;
+  }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #f4e3c2; box-shadow: 0 0 2px #000;
+  }
+  #crosshair::before { left: 12px; top: 0; width: 2px; height: 26px; }
+  #crosshair::after { top: 12px; left: 0; height: 2px; width: 26px; }
+  #crosshair .dot { position: absolute; left: 9px; top: 9px; width: 8px; height: 8px; border-radius: 50%;
+    background: rgba(0,0,0,0.0); border: 2px solid rgba(244,227,194,0.0); }
+  #crosshair.busy::before, #crosshair.busy::after { background: rgba(244,227,194,0.35); }
+
+  #banner {
+    position: absolute; left: 0; right: 0; top: 32%; text-align: center;
+    font-size: clamp(30px, 7vw, 64px); letter-spacing: 3px; color: #ffd27a;
+    text-shadow: 0 2px 0 #3a1f0c, 0 0 24px rgba(0,0,0,0.6);
+    opacity: 0; transition: opacity 0.3s; text-transform: uppercase;
+  }
+  #banner.show { opacity: 1; }
+  #banner small { display: block; font-size: 0.4em; letter-spacing: 2px; color: #f4e3c2; text-transform: none; }
+  #flash { position: absolute; inset: 0; background: radial-gradient(ellipse at center, rgba(200,20,10,0) 40%, rgba(200,20,10,0.85) 100%);
+    opacity: 0; transition: opacity 0.12s; }
+  #flash.show { opacity: 1; transition: none; }
+  #aimWarn { position: absolute; inset: 0; box-shadow: inset 0 0 0 0 rgba(255,200,80,0); opacity: 0; }
+
+  /* ------------ touch controls ------------ */
+  #touch { position: absolute; inset: 0; display: none; }
+  body.touch #touch { display: block; }
+  .tbtn {
+    position: absolute; pointer-events: auto; width: 84px; height: 84px; border-radius: 50%;
+    background: rgba(20,12,6,0.5); border: 2px solid rgba(244,227,194,0.45); color: #f4e3c2;
+    font: bold 15px Georgia, serif; display: flex; align-items: center; justify-content: center;
+    text-shadow: 0 1px 2px #000; letter-spacing: 1px;
+  }
+  .tbtn:active { background: rgba(255,210,122,0.5); }
+  #btnFire { right: calc(env(safe-area-inset-right, 0px) + 24px); bottom: calc(env(safe-area-inset-bottom, 0px) + 90px); width: 110px; height: 110px; font-size: 20px; }
+  #btnSwap { right: calc(env(safe-area-inset-right, 0px) + 150px); bottom: calc(env(safe-area-inset-bottom, 0px) + 70px); width: 70px; height: 70px; font-size: 13px; }
+  #btnReload { right: calc(env(safe-area-inset-right, 0px) + 150px); bottom: calc(env(safe-area-inset-bottom, 0px) + 150px); width: 70px; height: 70px; font-size: 13px; }
+  body.touch #weapon { bottom: calc(env(safe-area-inset-bottom, 0px) + 210px); }
+
+  /* ------------ overlay screens ------------ */
+  #title, #over {
+    position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; background: radial-gradient(ellipse at center, rgba(30,18,8,0.35) 0%, rgba(20,12,6,0.85) 100%);
+    padding: 20px;
+  }
+  #title h1, #over h1 {
+    font-size: clamp(38px, 9vw, 84px); margin: 0; letter-spacing: 4px; color: #ffd27a; text-transform: uppercase;
+    text-shadow: 0 3px 0 #3a1f0c, 0 0 30px rgba(0,0,0,0.7);
+  }
+  .sub { font-size: 18px; opacity: 0.9; margin: 8px 0 22px; font-style: italic; }
+  .big { font-size: 22px; margin: 14px 0; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 14px; }
+  button.btn {
+    font: 18px Georgia, serif; letter-spacing: 1px; color: #2a1c12; background: #ffd27a;
+    border: 0; border-radius: 6px; padding: 12px 26px; cursor: pointer; box-shadow: 0 3px 0 #8a5a32;
+  }
+  button.btn.secondary { background: rgba(244,227,194,0.15); color: #f4e3c2; box-shadow: none; border: 1px solid rgba(244,227,194,0.4); }
+  button.btn:active { transform: translateY(2px); box-shadow: none; }
+  #loadBar { width: min(360px, 80vw); height: 8px; background: rgba(244,227,194,0.2); border-radius: 4px; overflow: hidden; margin: 10px auto; }
+  #loadBar i { display: block; height: 100%; width: 0; background: #ffd27a; transition: width 0.2s; }
+  #controls { font-size: 14px; opacity: 0.8; max-width: 520px; line-height: 1.5; margin-top: 18px; }
+  #toggles { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 10px); right: calc(env(safe-area-inset-right, 0px) + 10px); display: flex; gap: 8px; }
+  #toggles button { font-size: 14px; padding: 8px 12px; }
+  #credits {
+    position: fixed; inset: 0; z-index: 20; background: rgba(20,12,6,0.92); overflow: auto; padding: 30px 20px;
+  }
+  #credits .inner { max-width: 640px; margin: 0 auto; }
+  #credits h2 { color: #ffd27a; letter-spacing: 2px; }
+  #credits ul { padding-left: 18px; line-height: 1.6; font-size: 15px; }
+  #credits a { color: #ffd27a; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="hudTop">
+    <div class="panel" id="leftPanel">
+      <div id="hearts">♥♥♥♥♥</div>
+    </div>
+    <div class="panel" id="raidTag">Raid 1</div>
+    <div class="panel" id="score"><b>0</b><div id="streak"></div></div>
+  </div>
+  <div class="panel" id="weapon">
+    <div id="weaponName">Rifle</div>
+    <div class="rounds" id="rounds">●</div>
+    <div class="hint" id="weaponHint">Q swap · R reload</div>
+  </div>
+  <div id="crosshair"><div class="dot"></div></div>
+  <div id="banner"></div>
+  <div id="flash"></div>
+  <div id="touch">
+    <div class="tbtn" id="btnFire">FIRE</div>
+    <div class="tbtn" id="btnSwap">SWAP</div>
+    <div class="tbtn" id="btnReload">RELOAD</div>
+  </div>
+</div>
+
+<div id="title">
+  <div id="toggles">
+    <button class="btn secondary" id="btnMute">Sound: on</button>
+    <button class="btn secondary hidden" id="btnGyro">Gyro: off</button>
+  </div>
+  <h1>Circle the Wagons</h1>
+  <div class="sub">Designed by Jeff</div>
+  <div class="big" id="best"></div>
+  <div id="loading"><div>Loading the prairie…</div><div id="loadBar"><i></i></div></div>
+  <div class="row hidden" id="startRow">
+    <button class="btn" id="btnStart">Take your stand</button>
+    <button class="btn secondary" id="btnCredits">Credits</button>
+  </div>
+  <div id="controls">
+    <span class="desk">Click to lock the mouse. Mouse aims, left click fires, <b>R</b> reloads, <b>Q</b> swaps Rifle / Six-shooter. A / D also turn. Esc releases.</span>
+    <span class="mob hidden">Drag to look. FIRE shoots, SWAP changes gun, RELOAD reloads.</span>
+  </div>
+</div>
+
+<div id="over" class="hidden">
+  <h1>Run Over</h1>
+  <div class="big" id="overScore"></div>
+  <div class="big" id="overBest"></div>
+  <div class="row"><button class="btn" id="btnAgain">Stand again</button><button class="btn secondary" id="btnMenu">Title</button></div>
+</div>
+
+<div id="credits" class="hidden">
+  <div class="inner">
+    <h2>Credits</h2>
+    <p>Circle the Wagons — designed by Jeff. Built with Three.js and Rapier.</p>
+    <ul id="creditList"></ul>
+    <p><button class="btn" id="btnCreditsClose">Back</button></p>
+  </div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

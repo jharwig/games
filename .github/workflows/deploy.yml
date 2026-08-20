@@ -66,9 +66,13 @@ jobs:
             const files = [];
             for (const d of process.argv.slice(1)) {
               files.push("./" + d + "/");
+              const root = path.join("_site", d);
               const walk = (p) => {
                 for (const e of fs.readdirSync(p, { withFileTypes: true })) {
                   const f = path.join(p, e.name);
+                  // <app>/media/** (Vite copies public/media there) holds large,
+                  // on-demand assets: never precache them.
+                  if (e.isDirectory() && path.relative(root, f) === "media") continue;
                   if (e.isDirectory()) walk(f);
                   else files.push("./" + path.relative("_site", f));
                 }

@@ -1,0 +1,11 @@
+{
+  "files": [
+    "hdri/plains_sunset_2k.hdr",
+    "tex/dirt_diff.jpg",
+    "tex/dirt_nor.jpg",
+    "tex/dirt_rough.jpg",
+    "tex/grass_diff.jpg",
+    "tex/grass_nor.jpg",
+    "tex/grass_rough.jpg"
+  ]
+}
