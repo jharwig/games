@@ -20,20 +20,26 @@ with it. Gameplay is the designer's: ask before changing game design.
   bus, and the `*Api` interface each module implements. Change contracts
   here first; modules follow.
 - `main.ts` — composition root and ALL game rules: hit resolution, hearts ↔
-  tree sync, round/run flow, scoring, screen transitions, fixed-timestep
-  loop. Modules detect and emit events; main applies consequences.
+  tree sync, round/run flow, scoring, what a THROW press does right now
+  (`ctx.throwPower`: throw from the seat / SUPER / Last Stand weak throw /
+  taunt), Dodge → SUPER charge, screen transitions, fixed-timestep loop.
+  Modules detect and emit events; main applies consequences.
 - `world.ts` — the four themed islands (terrain/water/sky), their swingsets
-  (owns swing pendulum integration; `pump()` is the only outside input),
+  (owns swing pendulum integration and the rhythm-pump judging; `pump()` is
+  the only outside input and returns the timing quality),
   trees with their alive/fallen/stump lifecycle, zip-line landing posts.
 - `player.ts` — character (boy/girl), movement state machine (swinging /
   airborne / ground / climbing / zipline, with the zip's cinematic cuts),
   and the camera rig (it owns the camera every frame).
-- `ship.ts` — pirate ship model/scaling, telegraphed firing, cannonball
-  ballistics + collision detection (emits `cannonImpact`; never applies
+- `ship.ts` — pirate ship model/scaling, telegraphed firing (rest-seat aim,
+  apex aim in later Rounds, taunt anger), cannonball ballistics + collision
+  and Dodge detection (emits `cannonImpact` / `cannonDodged`; never applies
   rules), sinking, trek repositioning.
 - `tools.ts` — pickups, held item, throws (hammer boomerang, log, caught
-  cannonball), chainsaw felling, wrench jam, magnet catch.
-- `ui.ts` — all DOM under `#ui`: screens, HUD, touch controls, mute.
+  cannonball; each carries a `ThrowPower` — SUPER glows and never misses),
+  chainsaw felling, wrench jam, magnet catch.
+- `ui.ts` — all DOM under `#ui`: screens, HUD, pump ring / callouts / taunt
+  bubble (projected over the kid), touch controls, mute.
 - `audio.ts` — WebAudio sea shanty + event-driven sfx. No audio assets.
 
 Conventions: Y-up, meters; four islands ring the archipelago centre, open

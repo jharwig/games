@@ -20,7 +20,9 @@ _Avoid_: wave, level
 
 **Ship**:
 The pirate ship in the water that aims and fires cannonballs. Each Round's
-Ship is slightly bigger than the previous one.
+Ship is slightly bigger than the previous one. It aims at where a Swing
+rests — so swinging high is the way to Dodge — but from Round 3 some shots
+lead the Swing to its forward apex.
 _Avoid_: boat, enemy
 
 **Heart**:
@@ -56,7 +58,8 @@ _Avoid_: destroyed, dead
 
 **Last Stand**:
 Play after all four Swingsets are Broken: the player fights on foot, dodging
-blasts and throwing Tools, until the Hearts run out.
+blasts and throwing Tools, until the Hearts run out. It is the one time a
+Tool may be thrown from the ground — at half power, with no Swing behind it.
 
 **Trek**:
 The journey from a wrecked Swingset to another one — a Zip Line ride between
@@ -77,7 +80,37 @@ the ride as a short cinematic cut sequence. Zipping is allowed any time, not
 just after a wreck — abandoning a live Swingset for fresh Trees is a choice.
 
 **Pump**:
-The one-button swinging input; each press drives the Swing higher.
+The one-button swinging input. It is a rhythm: a press lands PERFECT at
+either end of the arc (where the Swing pauses), "good" a little off it, and
+does nothing far off the beat. Only one press per half-swing counts, so
+mashing climbs slowly and tops out low; keeping the beat reaches full height
+in about six pumps. The Pump Ring over the rider shows the beat.
+
+**PERFECT**:
+A Pump pressed on the beat — the big push, with points. The Pump Ring
+flashes gold.
+
+**Pump Ring**:
+The ring floating over the rider while swinging: its fill sweeps to the top
+each half-swing; press when the tip is in the gold zone. Its core glows when
+a throw right now would be a SUPER Throw.
+
+**Dodge**:
+A cannonball that flies under a rider who is up high on the arc. Shouted as
+"DODGED!", worth points, and it banks a SUPER Throw for the next throw
+(dodge → counterattack).
+
+**SUPER Throw**:
+A throw released near the top of a big forward swing — or the throw after a
+Dodge: double damage, never misses, glowing trail, "SUPER!" pop. A SUPER
+Wrench jams longer.
+
+**Taunt**:
+Pressing THROW on the ground: the kid faces the Ship and jeers (speech
+bubble). The pirates get mad — their next shots come straight at the kid on
+the ground, faster with every taunt — which drags fire away from the Swings.
+Anger cools on its own. The first Taunt of a Run also hints that throwing
+happens from a Swing.
 
 **Bail**:
 Jumping off a Swing to run along the ground — usually to escape an incoming
@@ -90,7 +123,9 @@ lands costs a Heart, so the ground is never safe.
 
 **Tool**:
 An item the player uses to fight back and damage the Ship. Tools are found
-as pickups scattered around the Playground — sometimes up in a Tree.
+as pickups scattered around the Playground — sometimes up in a Tree. Tools
+are thrown (and the Magnet catches) only from a Swing — the ground is for
+fetching them, the Chainsaw, and Taunting; see Last Stand for the exception.
 _Avoid_: weapon, item
 
 **Boomerang Hammer**:
@@ -121,6 +156,7 @@ before each Round; the player may switch between Rounds.
 
 **Score**:
 Points earned across a Run from many actions: hitting the Ship with Tools,
-sinking Ships, time spent swinging, Swingsets found, Trees climbed. The best
-Score is saved in the browser.
+sinking Ships, time spent swinging (more the higher you swing), PERFECT
+Pumps, Dodges, Swingsets found, Trees climbed. The best Score is saved in
+the browser.
 _Avoid_: high score (use "best")

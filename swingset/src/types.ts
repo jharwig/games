@@ -108,6 +108,55 @@ export const SWING_ROPE_LENGTH = 3.2; // pivot (top bar) to seat
 export const SWING_BAR_HEIGHT = 3.6;
 export const SWING_MAX_ANGLE = 1.35; // rad, amplitude cap from pumping
 
+// Rhythm pumping. A press is judged by where the Swing is in its arc: the
+// sweet spot is either end of the arc (the Swing pauses there), measured as
+// pendulum phase distance from the peak (ω ≈ 1.75 rad/s, so 0.28 ≈ ±0.16 s).
+// A pump adds *energy* (½·angularVel² units), so a PERFECT is worth the same
+// wherever the seat is, and only one pump per half-swing is credited — the
+// first press that lands in the good zone takes that beat. Mashing therefore
+// tops out well below the cap; keeping the rhythm reaches it in ~6 pumps.
+export const PUMP_PERFECT_PHASE = 0.28;
+export const PUMP_GOOD_PHASE = 0.9;
+export const PUMP_ENERGY: Record<PumpQuality, number> = {
+  perfect: 0.7,
+  good: 0.12,
+  weak: 0,
+  kickoff: 0.35, // first push from a Swing hanging (nearly) still
+};
+export const PUMP_KICKOFF_AMPLITUDE = 0.18; // rad: below this the Swing is "at rest"
+
+// Throwing happens from the Swing. Released past SUPER_THROW_ANGLE (near the
+// top of a big forward swing) a throw is SUPER: double damage, no spread.
+export const SUPER_THROW_ANGLE = 0.9;
+export const THROW_DAMAGE_MULT: Record<ThrowPower, number> = {
+  normal: 1,
+  super: 2,
+  weak: 0.5, // Last Stand only: throwing from the ground, no swing power
+};
+
+// A cannonball that passes under a high rider is a Dodge.
+export const DODGE_RADIUS = 3.0; // XZ distance from the seat
+export const DODGE_CLEARANCE = 0.6; // ball this far below the seat
+export const DODGE_MIN_ANGLE = 0.5; // rad: the rider must actually be up high
+
+/** From this Round on, some shots lead the Swing to its forward apex. */
+export function apexAimChance(round: number): number {
+  return round < 3 ? 0 : Math.min(0.5, 0.25 + 0.05 * (round - 3));
+}
+
+// Taunting: THROW on the ground. The pirates get mad — the next shots come at
+// the kid on the ground — and madder with every taunt (faster fire).
+export const ANGER_MAX = 5;
+export const ANGER_DECAY_SECONDS = 7; // seconds for one level of anger to cool
+export const TAUNT_SECONDS = 1.1; // dance length
+/** What the kid yells (speech bubble). Genevieve's lines go here. */
+export const TAUNT_LINES: ReadonlyArray<string> = [
+  "Na-na, ya can't hit me!",
+  'My grandma aims better!',
+  'Is that all ya got, pirates?',
+  "Swing and a miss! Oh wait, that's YOU!",
+];
+
 export const BLAST_RADIUS = 4.5; // ground blast that costs a Heart
 export const PLAYER_HIT_RADIUS = 1.0; // ball-vs-player direct hit
 export const SWING_HIT_RADIUS = 1.1; // ball-vs-seat
@@ -144,7 +193,9 @@ export const TREK_FIRE_INTERVAL = 9;
 export const SCORE_POINTS = {
   hit: 10, // per point of damage dealt
   shipSunk: 500, // × round
-  swingPerSecond: 5, // while riding with decent amplitude
+  swingPerSecond: 8, // × (amplitude / SWING_MAX_ANGLE) while riding
+  perfectPump: 15,
+  dodge: 100,
   swingsetFound: 300,
   treeClimbed: 50,
 } as const;
@@ -157,11 +208,19 @@ export type ToolKind = 'chainsaw' | 'hammer' | 'magnet' | 'wrench';
 export type Screen = 'title' | 'playing' | 'roundWon' | 'gameOver';
 export type PlayerMode = 'swinging' | 'airborne' | 'ground' | 'climbing' | 'zipline';
 export type TreeState = 'alive' | 'fallen' | 'stump' | 'gone';
+/** How well a Pump press was timed (see PUMP_* above). */
+export type PumpQuality = 'perfect' | 'good' | 'weak' | 'kickoff';
+/** How hard a throw flies: from the seat ('normal'), from the top of a big
+ *  swing or after a Dodge ('super'), or from the ground in a Last Stand
+ *  ('weak'). */
+export type ThrowPower = 'normal' | 'super' | 'weak';
 
 export interface ScoreBreakdown {
   hits: number; // points from damaging the Ship
   shipsSunk: number; // count
   swingSeconds: number; // seconds of real swinging
+  perfectPumps: number; // count
+  dodges: number; // count
   swingsetsFound: number; // count
   treesClimbed: number; // count
   total: number; // running point total
@@ -175,12 +234,20 @@ export interface SwingInfo {
    *  positive = seat toward the water (-Z). */
   angle: number;
   angularVel: number;
-  /** Add pump energy (called by the player module on a pump press). */
-  pump(strength: number): void;
+  /** A Pump press: judged against the arc (PUMP_* constants), adds the
+   *  matching energy, and reports how well it was timed. */
+  pump(): PumpQuality;
+  /** Current swing amplitude in rad (the peak angle this energy reaches). */
+  amplitude(): number;
+  /** 0..1 — how close the next sweet spot is (fills toward 1 at each end
+   *  of the arc, snaps back after). 1 while the Swing hangs still. */
+  pumpReadiness(): number;
   /** Group whose rotation.x follows `angle`; seat mesh hangs at its end. */
   pivot: THREE.Object3D;
   /** Current world position of the seat. */
   seatWorldPos(out: THREE.Vector3): THREE.Vector3;
+  /** World position the seat would have at `angle` (apex targeting). */
+  seatPosAtAngle(angle: number, out: THREE.Vector3): THREE.Vector3;
   /** World position of the seat when hanging at rest (targeting). */
   restSeatPos: THREE.Vector3;
 }
@@ -225,6 +292,16 @@ export interface GameEvents {
     kind: 'water' | 'ground' | 'swing' | 'player';
     swing?: SwingInfo;
   };
+  /** A ball flew under a high rider without hitting (ship.ts detects;
+   *  main.ts applies points and the SUPER charge). */
+  cannonDodged: { pos: THREE.Vector3 };
+  /** The rider pressed Pump (player.ts); quality per PUMP_* timing. */
+  pumped: { quality: PumpQuality; amplitude: number };
+  /** THROW on the ground: the kid taunts the Ship; `anger` is the Ship's
+   *  new level (1..ANGER_MAX). */
+  taunted: { line: string; anger: number };
+  /** Big on-screen pop: DODGED! / SUPER! / the pirates' mood. */
+  callout: { text: string; kind: 'dodge' | 'super' | 'mad' };
   swingBroken: { swing: SwingInfo };
   heartLost: { reason: 'swingHit' | 'blast' | 'directHit' };
   shipDamaged: { amount: number; source: HeldKind; hp: number };
@@ -232,7 +309,7 @@ export interface GameEvents {
   shipJammed: { seconds: number };
   toolPickedUp: { tool: ToolKind };
   /** Any throw: tool, log, or caught cannonball. */
-  itemThrown: { kind: HeldKind };
+  itemThrown: { kind: HeldKind; power: ThrowPower };
   ballCaught: Record<string, never>;
   treeFelled: { tree: TreeInfo; cause: 'chainsaw' | 'heart' };
   chainsawRevved: Record<string, never>;
@@ -327,6 +404,9 @@ export interface PlayerApi {
   reset(setIndex: number): void;
   /** Hit while riding: lose the seat and tumble to the ground. */
   tumbleOff(): void;
+  /** Taunt dance (on the ground): face the Ship and jeer for TAUNT_SECONDS. */
+  taunt(): void;
+  readonly taunting: boolean;
   /** Where a held tool / carried log attaches (hand/back). */
   readonly carryAnchor: THREE.Object3D;
   cameraShake(intensity: number): void;
@@ -341,6 +421,9 @@ export interface ShipApi {
   readonly maxHp: number;
   readonly sunk: boolean;
   readonly jammedFor: number; // seconds of jam remaining
+  /** 0..ANGER_MAX — raised by taunts, cools over time. Angry cannons aim
+   *  at the kid wherever they are and fire faster. */
+  readonly anger: number;
   readonly cannonballs: ReadonlyArray<BallInfo>;
   /** Sail in a fresh (bigger) ship for this round at the current set. */
   startRound(round: number, setIndex: number): void;
@@ -350,6 +433,9 @@ export interface ShipApi {
   moveToSet(setIndex: number): void;
   damage(amount: number, source: HeldKind): void;
   jam(seconds: number): void;
+  /** A taunt landed: anger rises one level (returns the new level) and the
+   *  next shot comes straight away, at the kid. */
+  provoke(): number;
   /** Remove and return a ball in flight within `radius` of `pos` (Magnet). */
   catchNearestBall(pos: THREE.Vector3, radius: number): BallInfo | null;
   /** Does a projectile at `pos` hit the ship's hull? */
@@ -368,8 +454,10 @@ export interface ToolsApi {
   /** False while the held item is away — the Boomerang Hammer mid-flight is
    *  still `held`, but the hand is empty, so the carry pose must let go. */
   readonly heldInHand: boolean;
-  /** Throw/use input: returns true if the press did something. */
-  useHeld(): boolean;
+  /** Throw/use input: returns true if the press did something. `power`
+   *  scales a throw (and a Magnet catch is allowed); null means throwing is
+   *  not allowed here — only the Chainsaw still works. */
+  useHeld(power: ThrowPower | null): boolean;
   /** Nearest ground pickup within `radius` of `from` (for the kid's head to
    *  glance at). The returned vector is reused scratch — copy, don't keep. */
   nearestPickup(from: THREE.Vector3, radius: number): THREE.Vector3 | null;
@@ -417,6 +505,12 @@ export interface GameCtx {
   bestScore: number;
   /** Swingsets already credited as "found" this Run. */
   foundSets: Set<number>;
+  /** What a THROW press would do right now (main.ts decides each step; ui
+   *  reads it): null = taunt / chainsaw only. */
+  throwPower: ThrowPower | null;
+  /** A Dodge banked a SUPER throw: the next throw is super wherever it's
+   *  released from the seat. */
+  superCharged: boolean;
   world: WorldApi;
   player: PlayerApi;
   ship: ShipApi;

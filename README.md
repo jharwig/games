@@ -90,21 +90,22 @@ Bee Draw is a puzzle game about one line. A swarm of bees tries to reach the ani
 
 **Play:** https://jharwig.github.io/games/swingset/
 
-Pirates of the Swingset is a third-person 3D game set on a ring of four small islands — jungle, autumn, snow and volcanic — each with its own swingset, around the water where a pirate ship fires cannonballs at you. Swing high to dodge — a cannonball can pass right underneath you — or jump off and run when your swing is about to be hit. The ground is not safe: cannonballs shake the earth and hurt anyone caught in the blast.
+Pirates of the Swingset is a third-person 3D game set on a ring of four small islands — jungle, autumn, snow and volcanic — each with its own swingset, around the water where a pirate ship fires cannonballs at you. The swing is where the fighting happens: pump to the rhythm (press at each end of the arc for a PERFECT push — the ring over your head shows the beat), swing high to dodge — a cannonball passing underneath you is a DODGE and charges up a SUPER throw — and throw from the top of a big swing for a SUPER throw that does double damage and never misses. Jump off and run when your swing is about to be hit, but the ground is not safe: cannonballs shake the earth and hurt anyone caught in the blast.
 
-- Fight back with playground tools scattered around: a chainsaw (cut down a tree and throw it), a boomerang hammer, a giant magnet (catch a cannonball in mid-air and sling it back), and a wrench (jam the ship's cannon).
+- Fight back with playground tools scattered around: a chainsaw (cut down a tree and throw it), a boomerang hammer, a giant magnet (catch a cannonball in mid-air and sling it back), and a wrench (jam the ship's cannon). Tools are thrown only from a swing — on the ground, pressing THROW taunts the pirates instead: they get mad and fire at you on the ground (faster the more you taunt), which keeps the cannonballs off your swings.
 - The trees near your swingset are your five hearts: lose a heart and a tree falls down dead — but a fallen tree can be picked up and thrown at the ship.
 - Sink the ship to win the round; your hearts refill, the trees stand back up, and a slightly bigger ship sails in.
 - Climb a tree to survey the islands and grab a zip line to either neighbouring island — the camera rides along in cinematic cuts, and the ship keeps shooting: a mid-ride hit costs a heart.
-- Broken swings stay broken. If a whole swingset is wrecked, zip to another island. If every swingset is destroyed, fight on to the last heart in an on-foot last stand.
-- Score points for hitting the ship, sinking ships, swinging, finding swingsets, and climbing trees. Your best score is saved in the browser.
+- Broken swings stay broken. If a whole swingset is wrecked, zip to another island. If every swingset is destroyed, fight on to the last heart in an on-foot last stand — the one time you can throw from the ground, at half power.
+- From round 3 the pirates get smarter and sometimes aim at the top of your swing.
+- Score points for hitting the ship, sinking ships, swinging (more the higher you go), perfect pumps, dodges, finding swingsets, and climbing trees. Your best score is saved in the browser.
 
 ### Controls
 
-- **Space / SWING button** — pump the swing
+- **Space / SWING button** — pump the swing (press on the beat — at either end of the arc — for a PERFECT push)
 - **Left / Right arrows** — jump off the swing and run; at a treetop, ride the zip line to that side
 - **Up / Down arrows** — walk toward or away from the ship, and climb trees
-- **Enter or F / THROW button** — throw or use the held tool
+- **Enter or F / THROW button** — throw the held tool from the swing (SUPER near the top); on the ground, taunt the pirates (or cut with the chainsaw)
 - **On touch screens** — a virtual joystick in the lower left replaces the arrows: touch anywhere in that corner and tilt. Bailing off a swing or grabbing a zip line takes a firm sideways tilt.
 - **M** — mute / unmute the sea shanty
 - Pick the boy or the girl on the title screen; you can switch after every sunken ship.

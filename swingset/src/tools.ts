@@ -8,7 +8,9 @@ import * as THREE from 'three';
 import {
   MAGNET_CATCH_RADIUS,
   SWINGSET_POSITIONS,
+  THROW_DAMAGE_MULT,
   TOOL_DAMAGE,
+  type ThrowPower,
   WATER_Y,
   WRENCH_JAM_SECONDS,
   type GameCtx,
@@ -47,6 +49,10 @@ const THROW_GRAVITY: Record<HeldKind, number> = {
 };
 /** Fraction of the throw distance used as random spread (misses happen). */
 const THROW_SPREAD = 0.022;
+
+/** SUPER throws leave a glowing trail: a puff every this many metres. */
+const SUPER_TRAIL_SPACING = 1.6;
+const SUPER_GLOW_COLOR = 0xffd54a;
 
 const HAMMER_BACK_SPEED = 30;
 const HAMMER_BACK_TIMEOUT = 6;
@@ -250,6 +256,9 @@ interface Projectile {
   spinY: number;
   phase: 'out' | 'back';
   t: number;
+  power: ThrowPower;
+  glow: THREE.Mesh | null; // SUPER: halo riding on the mesh
+  trailAcc: number; // metres since the last trail puff
 }
 
 interface Splash {
@@ -595,7 +604,18 @@ export function createTools(ctx: GameCtx): ToolsApi {
     return out.copy(ctx.ship.aimPoint);
   }
 
-  function launch(kind: HeldKind): void {
+  const glowGeo = new THREE.SphereGeometry(0.55, 10, 8);
+  const glowMat = noOutline(
+    new THREE.MeshBasicMaterial({
+      color: SUPER_GLOW_COLOR,
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    }),
+  );
+
+  function launch(kind: HeldKind, power: ThrowPower): void {
     const mesh = takeMesh(kind);
     mesh.scale.setScalar(1);
     handWorldPos(_v1);
@@ -604,10 +624,19 @@ export function createTools(ctx: GameCtx): ToolsApi {
     group.add(mesh);
 
     shipAimPoint(_v2);
-    // Slight spread so throws can miss.
+    // Slight spread so throws can miss — a SUPER throw never does.
     const dist = _v1.distanceTo(_v2);
-    _v2.x += (Math.random() - 0.5) * dist * THROW_SPREAD * 2;
-    _v2.z += (Math.random() - 0.5) * dist * THROW_SPREAD;
+    if (power !== 'super') {
+      const spread = power === 'weak' ? THROW_SPREAD * 1.6 : THROW_SPREAD;
+      _v2.x += (Math.random() - 0.5) * dist * spread * 2;
+      _v2.z += (Math.random() - 0.5) * dist * spread;
+    }
+    let glow: THREE.Mesh | null = null;
+    if (power === 'super') {
+      glow = new THREE.Mesh(glowGeo, glowMat);
+      glow.scale.setScalar(kind === 'log' ? 2.4 : 1);
+      mesh.add(glow);
+    }
 
     const gravity = THROW_GRAVITY[kind];
     const time = Math.max(0.35, dist / THROW_SPEED[kind]);
@@ -625,8 +654,18 @@ export function createTools(ctx: GameCtx): ToolsApi {
       spinY: kind === 'hammer' ? 18 : kind === 'wrench' ? 12 : 1.5,
       phase: 'out',
       t: 0,
+      power,
+      glow,
+      trailAcc: 0,
     });
-    ctx.events.emit('itemThrown', { kind });
+    ctx.events.emit('itemThrown', { kind, power });
+  }
+
+  /** A projectile is done flying (hit, splash, or caught): drop its halo. */
+  function dropGlow(p: Projectile): void {
+    if (!p.glow) return;
+    p.mesh.remove(p.glow);
+    p.glow = null;
   }
 
   function surfaceYAt(x: number, z: number): number {
@@ -640,25 +679,29 @@ export function createTools(ctx: GameCtx): ToolsApi {
   }
 
   function onProjectileHitShip(p: Projectile): void {
-    spawnSplash(p.mesh.position, 0xffe08a, 1.3);
+    const superHit = p.power === 'super';
+    spawnSplash(p.mesh.position, superHit ? SUPER_GLOW_COLOR : 0xffe08a, superHit ? 2.2 : 1.3);
+    const mult = THROW_DAMAGE_MULT[p.power];
     switch (p.kind) {
       case 'wrench':
-        // ship.jam() owns the 'shipJammed' event.
-        ctx.ship.jam(WRENCH_JAM_SECONDS);
+        // ship.jam() owns the 'shipJammed' event. A SUPER wrench jams longer.
+        ctx.ship.jam(WRENCH_JAM_SECONDS * (superHit ? 1.5 : 1));
         break;
       case 'hammer':
-        ctx.ship.damage(TOOL_DAMAGE.hammer, 'hammer');
+        ctx.ship.damage(Math.round(TOOL_DAMAGE.hammer * mult), 'hammer');
         break;
       case 'cannonball':
-        ctx.ship.damage(TOOL_DAMAGE.cannonball, 'cannonball');
+        ctx.ship.damage(Math.round(TOOL_DAMAGE.cannonball * mult), 'cannonball');
         break;
       case 'log':
-        ctx.ship.damage(TOOL_DAMAGE.log, 'log');
+        ctx.ship.damage(Math.round(TOOL_DAMAGE.log * mult), 'log');
         break;
       default:
         break;
     }
-    ctx.events.emit('screenShake', { intensity: p.kind === 'log' ? 0.6 : 0.3 });
+    ctx.events.emit('screenShake', {
+      intensity: (p.kind === 'log' ? 0.6 : 0.3) * (superHit ? 1.4 : 1),
+    });
   }
 
   function updateProjectiles(dt: number): void {
@@ -681,6 +724,7 @@ export function createTools(ctx: GameCtx): ToolsApi {
         p.mesh.rotation.x += p.spinX * dt;
         if (d < HAMMER_CATCH_DIST || p.t > HAMMER_BACK_TIMEOUT) {
           // Caught: back in hand.
+          dropGlow(p);
           giveMesh(p.kind, p.mesh);
           projectiles.splice(i, 1);
           hammerInFlight = false;
@@ -695,6 +739,16 @@ export function createTools(ctx: GameCtx): ToolsApi {
       pos.addScaledVector(p.vel, dt);
       p.mesh.rotation.y += p.spinY * dt;
       p.mesh.rotation.x += p.spinX * dt;
+      if (p.glow) {
+        // Halo pulses; glowing puffs mark the arc behind a SUPER throw.
+        p.glow.rotation.set(0, 0, 0);
+        p.glow.scale.setScalar((p.kind === 'log' ? 2.4 : 1) * (1 + Math.sin(p.t * 28) * 0.18));
+        p.trailAcc += p.vel.length() * dt;
+        if (p.trailAcc >= SUPER_TRAIL_SPACING) {
+          p.trailAcc = 0;
+          spawnSplash(pos, SUPER_GLOW_COLOR, 0.5);
+        }
+      }
 
       let done = false;
       if (ctx.ship.hitTest(pos, HIT_RADIUS)) {
@@ -713,6 +767,7 @@ export function createTools(ctx: GameCtx): ToolsApi {
 
       if (!done) continue;
 
+      dropGlow(p);
       if (p.kind === 'hammer') {
         // Hit or miss, the Boomerang Hammer always curves back.
         p.phase = 'back';
@@ -757,19 +812,22 @@ export function createTools(ctx: GameCtx): ToolsApi {
 
   // --- use / throw ----------------------------------------------------------
 
-  function useHeld(): boolean {
+  function useHeld(power: ThrowPower | null): boolean {
     if (!held) return false;
+    // Fighting happens from the Swing: without a power only the Chainsaw
+    // (a ground job) answers the press.
+    if (power === null && held !== 'chainsaw') return false;
 
     switch (held) {
       case 'hammer': {
         if (hammerInFlight) return false;
         hammerInFlight = true;
         if (heldMesh) heldMesh.visible = false;
-        launch('hammer');
+        launch('hammer', power!);
         return true;
       }
       case 'wrench': {
-        launch('wrench');
+        launch('wrench', power!);
         setHeld(null); // consumed — it ends up in the sea either way
         return true;
       }
@@ -781,12 +839,12 @@ export function createTools(ctx: GameCtx): ToolsApi {
         return true;
       }
       case 'cannonball': {
-        launch('cannonball');
+        launch('cannonball', power!);
         setHeld('magnet'); // the Magnet is never lost
         return true;
       }
       case 'log': {
-        launch('log');
+        launch('log', power!);
         setHeld(null);
         return true;
       }
@@ -804,7 +862,10 @@ export function createTools(ctx: GameCtx): ToolsApi {
 
   function reset(): void {
     // Drop anything in flight or in hand and re-scatter the Playground.
-    for (const p of projectiles) giveMesh(p.kind, p.mesh);
+    for (const p of projectiles) {
+      dropGlow(p);
+      giveMesh(p.kind, p.mesh);
+    }
     projectiles.length = 0;
     hammerInFlight = false;
     revTree = null;

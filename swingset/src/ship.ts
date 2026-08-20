@@ -6,8 +6,14 @@
 
 import * as THREE from 'three';
 import {
+  ANGER_DECAY_SECONDS,
+  ANGER_MAX,
   ARCHIPELAGO_CENTER,
+  apexAimChance,
   type BallInfo,
+  DODGE_CLEARANCE,
+  DODGE_MIN_ANGLE,
+  DODGE_RADIUS,
   type GameCtx,
   type HeldKind,
   PLAYER_HIT_RADIUS,
@@ -36,6 +42,12 @@ const FLIGHT_MIN = 2.2;
 const FLIGHT_MAX = 3.0;
 const TARGET_SCATTER = 1.5;
 const PLAYER_AIM_CHANCE = 0.7;
+// Taunted pirates: scatter tightens, fire quickens per level, and the next
+// shot comes almost at once.
+const ANGRY_SCATTER = 0.7;
+const ANGRY_FIRE_SPEEDUP = 0.3; // fire interval ÷ (1 + level × this)
+const ANGRY_MIN_INTERVAL = 1.3;
+const ANGRY_RESPONSE = 0.4; // seconds until the provoked cannon starts aiming
 
 // Trajectory indicator: every ball in flight draws a dotted arc to its
 // landing spot, marked with a pulsing ring. Dots behind the ball shrink away
@@ -372,6 +384,7 @@ interface Ball extends BallInfo {
   mesh: THREE.Mesh;
   life: number;
   age: number;
+  dodged: boolean; // already credited as flying under a high rider
   trajTimes: number[]; // flight time at which the ball reaches each dot
   trajPts: THREE.Vector3[];
   ring: THREE.Mesh | null; // landing ring, returned to its pool on free
@@ -781,9 +794,12 @@ export function createShip(ctx: GameCtx): ShipApi {
   const anchor = new THREE.Vector2(0, -22);
   let trek = false;
   let jamPuffT = 0;
+  let anger = 0; // 0..ANGER_MAX, cools continuously
 
   function fireInterval(): number {
-    return phase === 'trek' ? TREK_FIRE_INTERVAL : spec.fireInterval;
+    const base = phase === 'trek' ? TREK_FIRE_INTERVAL : spec.fireInterval;
+    if (anger <= 0) return base;
+    return Math.max(ANGRY_MIN_INTERVAL, base / (1 + anger * ANGRY_FIRE_SPEEDUP));
   }
 
   function resetCannonTimers(): void {
@@ -820,11 +836,23 @@ export function createShip(ctx: GameCtx): ShipApi {
   function pickTarget(c: CannonNode): void {
     const p = ctx.player;
     let swing: SwingInfo | null = null;
-    if (Math.random() < PLAYER_AIM_CHANCE) {
+    let scatter = TARGET_SCATTER;
+    if (anger > 0) {
+      // Taunted: straight at the kid, wherever they are right now.
+      c.target.copy(p.position);
+      c.target.y += 0.9;
+      scatter = ANGRY_SCATTER;
+    } else if (Math.random() < PLAYER_AIM_CHANCE) {
       if (p.ridingSwing && !p.ridingSwing.broken) {
-        // Aim where the seat *rests* — swing high and the ball passes under.
         swing = p.ridingSwing;
-        c.target.copy(swing.restSeatPos);
+        if (Math.random() < apexAimChance(ctx.round)) {
+          // Later Rounds: lead the Swing to its forward apex, so riding high
+          // is not always safe.
+          swing.seatPosAtAngle(Math.max(0.6, swing.amplitude()), c.target);
+        } else {
+          // Aim where the seat *rests* — swing high and the ball passes under.
+          c.target.copy(swing.restSeatPos);
+        }
       } else {
         c.target.copy(p.position);
         c.target.y += 0.9;
@@ -837,8 +865,8 @@ export function createShip(ctx: GameCtx): ShipApi {
         c.target.y += 0.9;
       }
     }
-    c.target.x += (Math.random() - 0.5) * 2 * TARGET_SCATTER;
-    c.target.z += (Math.random() - 0.5) * 2 * TARGET_SCATTER;
+    c.target.x += (Math.random() - 0.5) * 2 * scatter;
+    c.target.z += (Math.random() - 0.5) * 2 * scatter;
     c.targetSwing = swing;
   }
 
@@ -885,6 +913,7 @@ export function createShip(ctx: GameCtx): ShipApi {
       mesh,
       life: BALL_MAX_LIFE,
       age: 0,
+      dodged: false,
       trajTimes: [],
       trajPts: [],
       ring: null,
@@ -1036,6 +1065,19 @@ export function createShip(ctx: GameCtx): ShipApi {
       if (!hit && b.pos.y <= WATER_Y + BALL_RADIUS) {
         hit = 'water';
       }
+      // A Dodge: the ball passes under a rider who is up high on the arc.
+      if (!hit && !b.dodged) {
+        const rs = ctx.player.ridingSwing;
+        if (rs && !rs.broken && Math.abs(rs.angle) > DODGE_MIN_ANGLE) {
+          rs.seatWorldPos(tmpA);
+          const dx = tmpA.x - b.pos.x;
+          const dz = tmpA.z - b.pos.z;
+          if (dx * dx + dz * dz < DODGE_RADIUS * DODGE_RADIUS && tmpA.y - b.pos.y > DODGE_CLEARANCE) {
+            b.dodged = true;
+            ctx.events.emit('cannonDodged', { pos: b.pos.clone() });
+          }
+        }
+      }
 
       if (!hit && (b.life <= 0 || b.pos.y < -40)) {
         freeBall(b);
@@ -1081,6 +1123,7 @@ export function createShip(ctx: GameCtx): ShipApi {
     sinkT = 0;
     jammedFor = 0;
     trek = false;
+    anger = 0;
     hitFlash = 0;
     clearBalls();
     destroyModel();
@@ -1323,6 +1366,9 @@ export function createShip(ctx: GameCtx): ShipApi {
     get jammedFor() {
       return jammedFor;
     },
+    get anger() {
+      return anger;
+    },
     get cannonballs(): ReadonlyArray<BallInfo> {
       return balls;
     },
@@ -1399,6 +1445,20 @@ export function createShip(ctx: GameCtx): ShipApi {
       }
     },
 
+    provoke(): number {
+      anger = Math.min(ANGER_MAX, Math.floor(anger) + 1);
+      if (model && !sunk) {
+        // Answer right away: the idlest cannon starts aiming at once.
+        let soonest: CannonNode | null = null;
+        for (const c of model.cannons) {
+          if (c.phase !== 'wait') continue;
+          if (!soonest || c.timer > soonest.timer) soonest = c;
+        }
+        if (soonest) soonest.timer = Math.min(soonest.timer, ANGRY_RESPONSE);
+      }
+      return anger;
+    },
+
     catchNearestBall(pos: THREE.Vector3, radius: number): BallInfo | null {
       let best = -1;
       let bestD = radius * radius;
@@ -1431,6 +1491,7 @@ export function createShip(ctx: GameCtx): ShipApi {
     update(dt: number): void {
       clock += dt;
       if (jammedFor > 0) jammedFor = Math.max(0, jammedFor - dt);
+      if (anger > 0) anger = Math.max(0, anger - dt / ANGER_DECAY_SECONDS);
       updateShipMotion(dt);
       updateCannons(dt);
       updateJamPuffs(dt);

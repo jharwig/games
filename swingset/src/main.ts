@@ -12,8 +12,12 @@ import {
   type GameCtx,
   HEARTS_MAX,
   SCORE_POINTS,
+  SUPER_THROW_ANGLE,
+  SWING_MAX_ANGLE,
   type ScoreBreakdown,
   type SwingInfo,
+  TAUNT_LINES,
+  type ThrowPower,
 } from './types';
 import { clearFrameInput, createInput } from './input';
 import { createWorld } from './world';
@@ -26,7 +30,16 @@ import { createAudio } from './audio';
 const BEST_KEY = 'pirates-of-the-swingset-best';
 
 function freshScore(): ScoreBreakdown {
-  return { hits: 0, shipsSunk: 0, swingSeconds: 0, swingsetsFound: 0, treesClimbed: 0, total: 0 };
+  return {
+    hits: 0,
+    shipsSunk: 0,
+    swingSeconds: 0,
+    perfectPumps: 0,
+    dodges: 0,
+    swingsetsFound: 0,
+    treesClimbed: 0,
+    total: 0,
+  };
 }
 
 // --- renderer / scene ------------------------------------------------------
@@ -81,6 +94,8 @@ const ctx = {
   score: freshScore(),
   bestScore: Number(localStorage.getItem(BEST_KEY) ?? '0'),
   foundSets: new Set<number>(),
+  throwPower: null,
+  superCharged: false,
 } as GameCtx;
 
 ctx.world = createWorld(ctx);
@@ -102,6 +117,71 @@ function addPoints(n: number): void {
 }
 
 // --- rules (event handlers) ------------------------------------------------
+
+/** Every Swingset wrecked: the player fights on foot until the Hearts go. */
+function lastStand(): boolean {
+  return ctx.world.swingsets.every((s) => s.wrecked());
+}
+
+/** What a THROW press does right now. Fighting happens from the Swing: a
+ *  throw from the seat is normal, SUPER near the top of a big forward swing
+ *  (or with a Dodge banked); on the ground only a Last Stand allows a weak
+ *  throw — otherwise the press is a taunt (or a Chainsaw cut). */
+function throwPowerNow(): ThrowPower | null {
+  const p = ctx.player;
+  const swing = p.ridingSwing;
+  if (p.mode === 'swinging' && swing && !swing.broken) {
+    if (ctx.superCharged || swing.angle > SUPER_THROW_ANGLE) return 'super';
+    return 'normal';
+  }
+  if (p.mode === 'ground' && lastStand()) return 'weak';
+  return null;
+}
+
+const MAD_TEXT = ['', 'The pirates are MAD!', 'REALLY MAD!', 'FURIOUS!', 'BERSERK!', 'BERSERK!!'];
+let tauntHintShown = false; // "Get on a swing to throw!" — once per Run
+let tauntIndex = 0;
+
+function taunt(): void {
+  const p = ctx.player;
+  if (p.mode !== 'ground' || p.taunting) return;
+  p.taunt();
+  const anger = ctx.ship.provoke();
+  const line = TAUNT_LINES[tauntIndex++ % TAUNT_LINES.length];
+  events.emit('taunted', { line, anger });
+  events.emit('callout', { text: MAD_TEXT[Math.min(anger, MAD_TEXT.length - 1)], kind: 'mad' });
+  if (!tauntHintShown && !lastStand()) {
+    tauntHintShown = true;
+    events.emit('message', { text: 'Get on a swing to throw!' });
+  }
+}
+
+function onThrowPressed(): void {
+  const power = ctx.throwPower;
+  if (ctx.tools.useHeld(power)) return;
+  // Nothing to throw from here: on the ground the press is a jeer.
+  if (ctx.player.mode === 'ground') taunt();
+}
+
+events.on('itemThrown', (e) => {
+  if (e.power !== 'super') return;
+  ctx.superCharged = false; // a banked Dodge is spent on this throw
+  events.emit('callout', { text: 'SUPER!', kind: 'super' });
+});
+
+events.on('pumped', (e) => {
+  if (ctx.screen !== 'playing' || e.quality !== 'perfect') return;
+  ctx.score.perfectPumps += 1;
+  addPoints(SCORE_POINTS.perfectPump);
+});
+
+events.on('cannonDodged', () => {
+  if (ctx.screen !== 'playing') return;
+  ctx.score.dodges += 1;
+  addPoints(SCORE_POINTS.dodge);
+  ctx.superCharged = true; // dodge → counterattack
+  events.emit('callout', { text: 'DODGED!', kind: 'dodge' });
+});
 
 function loseHeart(reason: 'swingHit' | 'blast' | 'directHit'): void {
   if (ctx.screen !== 'playing' || ctx.hearts <= 0) return;
@@ -230,6 +310,10 @@ function startRun(): void {
   ctx.score = freshScore();
   ctx.foundSets = new Set([0]);
   hasZipped = false;
+  tauntHintShown = false;
+  tauntIndex = 0;
+  ctx.superCharged = false;
+  ctx.throwPower = null;
   ctx.world.repairAllSwings();
   ctx.world.syncHeartTrees(0, ctx.hearts);
   ctx.tools.reset();
@@ -277,14 +361,16 @@ function simStep(dt: number): void {
     ctx.ship.update(dt);
     ctx.tools.update(dt);
 
-    // Throw / use the held tool.
-    if (ctx.input.throwPressed) ctx.tools.useHeld();
+    // Throw / use the held tool — or taunt.
+    ctx.throwPower = throwPowerNow();
+    if (ctx.input.throwPressed) onThrowPressed();
 
-    // Points for real swinging.
+    // Points for real swinging: the higher, the more.
     const s = ctx.player.ridingSwing;
-    if (s && Math.abs(s.angle) + Math.abs(s.angularVel) * 0.3 > 0.35) {
+    const ampFrac = s && !s.broken ? s.amplitude() / SWING_MAX_ANGLE : 0;
+    if (ampFrac > 0.2) {
       ctx.score.swingSeconds += dt;
-      swingScoreAcc += dt * SCORE_POINTS.swingPerSecond;
+      swingScoreAcc += dt * SCORE_POINTS.swingPerSecond * ampFrac;
       if (swingScoreAcc >= 1) {
         const whole = Math.floor(swingScoreAcc);
         swingScoreAcc -= whole;

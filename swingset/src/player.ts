@@ -17,8 +17,10 @@ import {
   type PlayerApi,
   type PlayerMode,
   SWINGSET_POSITIONS,
+  SWING_MAX_ANGLE,
   setYaw,
   type SwingInfo,
+  TAUNT_SECONDS,
   towardCenter,
   type TreeInfo,
   ZIP_HANG,
@@ -66,9 +68,9 @@ const LOOK_PITCH_MIN = -0.5;
 const LOOK_PITCH_MAX = 0.35;
 const LOOK_BEHIND_IN = 1.6;
 const LOOK_BEHIND_OUT = 2.2;
-// world.ts scales pump impulses by 0.55 internally; 1.0 here means ~4-5
-// presses take the swing from rest to the amplitude cap.
-const PUMP_STRENGTH = 1.0;
+// Camera: the lens widens a touch with swing height so speed reads on screen.
+const CAM_FOV = 60;
+const CAM_FOV_SWING_BOOST = 7;
 const HOP_ON_RADIUS = 1.2;
 const CLIMB_RADIUS = 1.5;
 const HOP_COOLDOWN = 1.2;
@@ -424,6 +426,8 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   let stunTimer = 0;
   let crouchTimer = 0;
   let pumpKick = 0; // visual kick right after a pump press
+  let tauntTimer = 0; // taunt dance remaining (ground)
+  let tauntPhase = 0;
   let tumbling = false;
   const tumbleSpin = new THREE.Vector3();
 
@@ -578,6 +582,7 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     atLookout = false;
     lookoutEmitted = false;
     throwTimer = -1;
+    tauntTimer = 0;
     zipToSet = -1;
     zipP = 0;
     currentSetIndex = setIndex;
@@ -648,6 +653,13 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     cameraShake(0.5);
   }
 
+  function taunt(): void {
+    if (mode !== 'ground') return;
+    tauntTimer = TAUNT_SECONDS;
+    tauntPhase = 0;
+    facing = frameYaw; // square up to the Ship to jeer at it
+  }
+
   function land(): void {
     position.y = Math.max(groundY(position.x, position.z), WADE_MIN);
     vel.set(0, 0, 0);
@@ -687,8 +699,10 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     if (!active) return;
 
     if (ctx.input.pumpPressed) {
-      swing.pump(PUMP_STRENGTH);
-      pumpKick = 1;
+      const quality = swing.pump();
+      pumpKick = quality === 'perfect' || quality === 'kickoff' ? 1 : quality === 'good' ? 0.6 : 0.25;
+      if (quality === 'perfect') cameraShake(0.12);
+      ctx.events.emit('pumped', { quality, amplitude: swing.amplitude() });
     }
 
     // Bail on a fresh left/right press.
@@ -1078,6 +1092,30 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     target.headPitch = -run * 0.05;
     // Stride bounce: two beats per cycle (one per footfall).
     runBob = Math.abs(s) * (0.008 + 0.03 * run) * g;
+    if (tauntTimer > 0) poseTauntOverlay();
+  }
+
+  /** Taunt dance: arms up waving at the Ship, hips wagging, chin up. */
+  function poseTauntOverlay(): void {
+    const w = Math.sin(tauntPhase * 16);
+    const fade = clamp(tauntTimer / 0.2, 0, 1); // settle back at the end
+    target.shoulderL = lerp(target.shoulderL, 2.7 + w * 0.4, fade);
+    target.shoulderR = lerp(target.shoulderR, 2.7 - w * 0.4, fade);
+    target.shoulderSpread = lerp(target.shoulderSpread, 0.55, fade);
+    target.elbowL = lerp(target.elbowL, 0.9, fade);
+    target.elbowR = lerp(target.elbowR, 0.9, fade);
+    target.lean = lerp(target.lean, 0.22 + w * 0.05, fade);
+    target.headPitch = lerp(target.headPitch, 0.3, fade);
+    target.legSpread = lerp(target.legSpread, 0.22 + w * 0.1, fade);
+    if (gait < 0.05) {
+      // Standing still: bounce on the knees to the beat.
+      const hop = Math.max(0, Math.sin(tauntPhase * 8));
+      target.kneeL = lerp(target.kneeL, -0.35 * hop, fade);
+      target.kneeR = lerp(target.kneeR, -0.35 * hop, fade);
+      target.hipL = lerp(target.hipL, 0.18 * hop, fade);
+      target.hipR = lerp(target.hipR, 0.18 * hop, fade);
+      runBob = -0.04 * hop * fade;
+    }
   }
 
   function poseClimbing(): void {
@@ -1371,6 +1409,21 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     ctx.camera.lookAt(camLook);
   }
 
+  /** Lens widens with swing height (speed on screen); eases back otherwise. */
+  let fov = CAM_FOV;
+  function updateFov(dt: number): void {
+    let want = CAM_FOV;
+    if (mode === 'swinging' && ridingSwing && !ridingSwing.broken) {
+      const k = clamp(ridingSwing.amplitude() / SWING_MAX_ANGLE, 0, 1);
+      want += CAM_FOV_SWING_BOOST * k * k;
+    }
+    fov = damp(fov, want, 3, dt);
+    if (Math.abs(ctx.camera.fov - fov) > 0.01) {
+      ctx.camera.fov = fov;
+      ctx.camera.updateProjectionMatrix();
+    }
+  }
+
   /** From the ground the neighbour islands are misty silhouettes; a Lookout
    *  opens the fog right up to survey the ring, and a zip ride keeps the
    *  destination island visible ahead. It closes again afterwards. */
@@ -1397,6 +1450,7 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   function updateCamera(dt: number): void {
     aimCamera();
     updateFog(dt);
+    updateFov(dt);
     // Cinematic cuts: a new zip shot snaps instead of easing across the sea.
     if (mode === 'zipline' && zipShotNow !== zipShot) {
       zipShot = zipShotNow;
@@ -1494,6 +1548,11 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     if (hopCooldown > 0) hopCooldown -= dt;
     if (crouchTimer > 0) crouchTimer -= dt;
     if (pumpKick > 0) pumpKick = Math.max(0, pumpKick - dt * 4);
+    if (tauntTimer > 0) {
+      tauntTimer -= dt;
+      tauntPhase += dt;
+      if (mode !== 'ground') tauntTimer = 0;
+    }
 
     updateFrame();
 
@@ -1571,6 +1630,10 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     setCharacter,
     reset,
     tumbleOff,
+    taunt,
+    get taunting() {
+      return tauntTimer > 0;
+    },
     carryAnchor,
     cameraShake,
     update,

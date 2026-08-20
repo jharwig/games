@@ -17,6 +17,11 @@ import {
   ISLAND_SEA_R,
   ISLAND_THEMES,
   ISLAND_TOP,
+  PUMP_ENERGY,
+  PUMP_GOOD_PHASE,
+  PUMP_KICKOFF_AMPLITUDE,
+  PUMP_PERFECT_PHASE,
+  type PumpQuality,
   SEABED_Y,
   SHIP_ORBIT,
   STUMP_REGROW_SECONDS,
@@ -52,8 +57,11 @@ import {
 // --- tuning ----------------------------------------------------------------
 
 const G = 9.81;
-const SWING_DAMPING = 0.22;
-const PUMP_GAIN = 0.55;
+// Light damping: an unattended Swing keeps going a while, and rhythm pumping
+// (PUMP_ENERGY per credited press) can reach SWING_MAX_ANGLE against it.
+const SWING_DAMPING = 0.06;
+/** Small-angle pendulum rate — used for the pump timing phase. */
+const SWING_OMEGA = Math.sqrt(G / SWING_ROPE_LENGTH);
 const BAR_SPAN = 7; // metres of top bar along X
 const SEAT_OFFSETS = [-2.55, -0.85, 0.85, 2.55]; // SWINGS_PER_SET along the bar
 
@@ -178,6 +186,28 @@ interface Swing extends SwingInfo {
   offsetX: number;
   phase: number;
   sway: number;
+  /** A pump has been credited this half-swing (cleared passing the bottom). */
+  pumpCredited: boolean;
+  lastAngleSign: number;
+}
+
+/** Pendulum phase: 0 at the forward peak, ±π at the back peak, decreasing
+ *  with time (θ = A·cos(ωt) → phase = −ωt). Peaks are where it crosses a
+ *  multiple of π. */
+function swingPhase(s: Swing): number {
+  return Math.atan2(s.angularVel / SWING_OMEGA, s.angle);
+}
+
+/** Phase distance (rad, ≥ 0) to the nearest peak, either side. */
+function peakDistance(phase: number): number {
+  const m = ((phase % Math.PI) + Math.PI) % Math.PI; // 0..π
+  return Math.min(m, Math.PI - m);
+}
+
+/** Amplitude implied by the pendulum's energy. */
+function amplitudeOf(s: Swing): number {
+  const cosAmp = Math.cos(s.angle) - (s.angularVel * s.angularVel * SWING_ROPE_LENGTH) / (2 * G);
+  return Math.acos(Math.max(-1, Math.min(1, cosAmp)));
 }
 
 type TreeAnim = 'none' | 'falling' | 'standing' | 'regrow';
@@ -769,26 +799,64 @@ export function createWorld(ctx: GameCtx): WorldApi {
         offsetX,
         phase: si * 1.7 + k * 2.3,
         sway: 0,
+        pumpCredited: false,
+        lastAngleSign: 0,
         // Seat row runs along the group's local X — rotate into world space.
         restSeatPos: new THREE.Vector3(
           spot.x + offsetX * islandCos[si],
           baseY + SWING_BAR_HEIGHT - SWING_ROPE_LENGTH,
           spot.z - offsetX * islandSin[si],
         ),
-        pump(strength: number) {
-          if (swing.broken) return; // a Broken Swing never simulates
+        pump(): PumpQuality {
+          if (swing.broken) return 'weak'; // a Broken Swing never simulates
+          let quality: PumpQuality;
+          if (amplitudeOf(swing) < PUMP_KICKOFF_AMPLITUDE) {
+            quality = 'kickoff'; // hanging still: any press gets it going
+          } else {
+            const d = peakDistance(swingPhase(swing));
+            quality = d < PUMP_PERFECT_PHASE ? 'perfect' : d < PUMP_GOOD_PHASE ? 'good' : 'weak';
+            // One credited pump per half-swing: a second press on the same
+            // beat (mashing) does nothing.
+            if (quality !== 'weak') {
+              if (swing.pumpCredited) return 'weak';
+              swing.pumpCredited = true;
+            }
+          }
+          const energy = PUMP_ENERGY[quality];
+          if (energy <= 0) return quality;
+          // Push along the current motion (toward the bottom when paused at a
+          // peak): the energy — not the kick — is what the timing earned.
           const dir =
             Math.abs(swing.angularVel) > 0.03
               ? Math.sign(swing.angularVel)
               : Math.abs(swing.angle) > 0.03
                 ? -Math.sign(swing.angle)
                 : 1;
-          swing.angularVel += dir * strength * PUMP_GAIN;
+          const v = swing.angularVel;
+          swing.angularVel = dir * Math.sqrt(v * v + 2 * energy);
           clampAmplitude(swing);
+          return quality;
+        },
+        amplitude(): number {
+          return amplitudeOf(swing);
+        },
+        pumpReadiness(): number {
+          if (amplitudeOf(swing) < PUMP_KICKOFF_AMPLITUDE) return 1;
+          // Phase falls with time; the next peak is the next multiple of π
+          // below it, so the remaining distance is (phase mod π).
+          const m = ((swingPhase(swing) % Math.PI) + Math.PI) % Math.PI;
+          return 1 - m / Math.PI;
         },
         seatWorldPos(out: THREE.Vector3): THREE.Vector3 {
           seat.updateWorldMatrix(true, false);
           return out.setFromMatrixPosition(seat.matrixWorld);
+        },
+        seatPosAtAngle(angle: number, out: THREE.Vector3): THREE.Vector3 {
+          // rotation.x = angle about the pivot: the seat hangs at (0, -L, 0).
+          out.set(0, -SWING_ROPE_LENGTH * Math.cos(angle), -SWING_ROPE_LENGTH * Math.sin(angle));
+          out.add(pivot.position);
+          group.updateWorldMatrix(true, false);
+          return group.localToWorld(out);
         },
       };
       swings.push(swing);
@@ -1099,6 +1167,12 @@ export function createWorld(ctx: GameCtx): WorldApi {
       s.angularVel += acc * dt;
       s.angle += s.angularVel * dt;
       clampAmplitude(s);
+      // Passing the bottom starts a new half-swing: the next beat is open.
+      const sign = Math.sign(s.angle);
+      if (sign !== 0 && sign !== s.lastAngleSign) {
+        s.lastAngleSign = sign;
+        s.pumpCredited = false;
+      }
       // Positive angle sends the seat toward -Z, i.e. toward the water.
       s.pivot.rotation.x = s.angle;
     }

@@ -3,6 +3,7 @@
 // by a lookahead scheduler, plus event-driven sound effects.
 
 import type { AudioApi, EventKey, GameCtx, HeldKind } from './types';
+import { SWING_MAX_ANGLE } from './types';
 
 const MUTE_KEY = 'pirates-of-the-swingset-muted';
 
@@ -466,6 +467,59 @@ export function createAudio(ctx: GameCtx): AudioApi {
       freq: big ? 500 : 1400, freqTo: big ? 160 : 500, q: 1.2,
     });
     if (big) tone({ type: 'sine', freq: 150, freqTo: 60, at: t, dur: 0.35, gain: 0.16 });
+    if (e.power === 'super') {
+      // SUPER: a bigger whoosh and a rising sparkle.
+      noiseBurst({ at: t, dur: 0.5, gain: 0.3, type: 'highpass', freq: 900, freqTo: 4000, q: 0.8 });
+      [79, 84, 88, 91].forEach((m, i) => {
+        tone({ type: 'triangle', freq: hz(m), at: t + 0.04 + i * 0.06, dur: 0.35, gain: 0.14, filter: 5000 });
+      });
+    }
+  });
+
+  // Pump: a ding that climbs with swing height — bright pair on a PERFECT,
+  // single soft note on a good press, a dull tick when it's off the beat.
+  ctx.events.on('pumped', (e) => {
+    if (!ac || muted) return;
+    const t = now();
+    const lift = Math.round(Math.min(1, e.amplitude / SWING_MAX_ANGLE) * 12);
+    if (e.quality === 'perfect' || e.quality === 'kickoff') {
+      const base = (e.quality === 'kickoff' ? 67 : 72) + lift;
+      tone({ type: 'sine', freq: hz(base), at: t, dur: 0.28, gain: 0.2, attack: 0.004 });
+      tone({ type: 'triangle', freq: hz(base + 7), at: t + 0.05, dur: 0.34, gain: 0.14, filter: 4000 });
+      noiseBurst({ at: t, dur: 0.3, gain: 0.16, type: 'bandpass', freq: 600, freqTo: 2400, q: 0.9 });
+    } else if (e.quality === 'good') {
+      tone({ type: 'sine', freq: hz(69 + lift), at: t, dur: 0.18, gain: 0.13 });
+      noiseBurst({ at: t, dur: 0.2, gain: 0.1, type: 'bandpass', freq: 500, freqTo: 1500, q: 0.9 });
+    } else {
+      tone({ type: 'triangle', freq: 220, freqTo: 140, at: t, dur: 0.07, gain: 0.08, filter: 900 });
+    }
+  });
+
+  on('cannonDodged', () => {
+    const t = now();
+    // The ball whistles past underneath, then a quick triumphant chime.
+    noiseBurst({ at: t, dur: 0.32, gain: 0.3, type: 'bandpass', freq: 2600, freqTo: 500, q: 2 });
+    [76, 83, 88].forEach((m, i) => {
+      tone({ type: 'sine', freq: hz(m), at: t + 0.1 + i * 0.07, dur: 0.4, gain: 0.16, attack: 0.01 });
+    });
+  });
+
+  // Taunt: a raspberry, the "nyah-nyah" sing-song, and the pirates growl
+  // back — louder the madder they are.
+  ctx.events.on('taunted', (e) => {
+    if (!ac || muted) return;
+    const t = now();
+    tone({ type: 'sawtooth', freq: 95, freqTo: 70, at: t, dur: 0.22, gain: 0.16, filter: 1400 });
+    noiseBurst({ at: t, dur: 0.22, gain: 0.18, type: 'bandpass', freq: 260, q: 3 });
+    const sing: Array<[number, number]> = [[79, 0.3], [79, 0.42], [76, 0.54], [81, 0.66], [79, 0.78], [76, 0.9]];
+    for (const [m, off] of sing) {
+      tone({ type: 'square', freq: hz(m), at: t + off, dur: 0.11, gain: 0.07, filter: 2600 });
+      tone({ type: 'triangle', freq: hz(m), at: t + off, dur: 0.11, gain: 0.1 });
+    }
+    const g = 0.1 + 0.05 * Math.min(e.anger, 5);
+    tone({ type: 'sawtooth', freq: 62, freqTo: 44, at: t + 1.0, dur: 0.55, gain: g, attack: 0.04, filter: 500 });
+    tone({ type: 'square', freq: 48, freqTo: 36, at: t + 1.02, dur: 0.5, gain: g * 0.6, filter: 300 });
+    noiseBurst({ at: t + 1.0, dur: 0.4, gain: g * 0.8, type: 'lowpass', freq: 400, freqTo: 150 });
   });
 
   on('ballCaught', () => {

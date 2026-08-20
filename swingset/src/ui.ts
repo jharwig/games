@@ -3,8 +3,9 @@
 // touch controls and the mute button. Styles are injected from here; no
 // external fonts or assets — inline SVG only.
 
+import * as THREE from 'three';
 import type { CharacterKind, GameCtx, HeldKind, Screen, UiApi } from './types';
-import { HEARTS_MAX } from './types';
+import { HEARTS_MAX, PUMP_PERFECT_PHASE } from './types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -106,6 +107,79 @@ const CSS = `
   opacity: 0; transition: opacity .12s linear;
 }
 #ui .pots-incoming.show { opacity: 1; }
+
+/* Big pops: DODGED! / SUPER! / the pirates' mood */
+#ui .pots-callout {
+  position: absolute; left: 50%; top: 30%; transform: translate(-50%, 0) scale(.6);
+  font-size: clamp(26px, 7vw, 52px); font-weight: 900; letter-spacing: .1em;
+  white-space: nowrap; pointer-events: none;
+  text-shadow:
+    -2px -2px 0 #3a1c0c, 2px -2px 0 #3a1c0c,
+    -2px 2px 0 #3a1c0c, 2px 2px 0 #3a1c0c,
+    0 5px 0 rgba(40,20,8,.5);
+  opacity: 0;
+}
+#ui .pots-callout.show { animation: pots-pop 1.1s cubic-bezier(.2,1.4,.4,1) both; }
+@keyframes pots-pop {
+  0% { opacity: 0; transform: translate(-50%, 10px) scale(.5); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.12); }
+  30% { transform: translate(-50%, 0) scale(1); }
+  75% { opacity: 1; transform: translate(-50%, -6px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -26px) scale(.96); }
+}
+#ui .pots-callout.dodge { color: #8ff0ff; text-shadow: -2px -2px 0 #0f3a4a, 2px -2px 0 #0f3a4a, -2px 2px 0 #0f3a4a, 2px 2px 0 #0f3a4a, 0 5px 0 rgba(10,40,50,.5), 0 0 22px rgba(120,230,255,.7); }
+#ui .pots-callout.super { color: #ffe14a; text-shadow: -2px -2px 0 #5c2a08, 2px -2px 0 #5c2a08, -2px 2px 0 #5c2a08, 2px 2px 0 #5c2a08, 0 5px 0 rgba(60,30,10,.5), 0 0 26px rgba(255,180,40,.85); }
+#ui .pots-callout.mad { color: #ff6b5a; font-size: clamp(18px, 4.6vw, 34px); top: 36%; }
+
+/* Pump ring: floats over the rider; fills toward the top each half-swing.
+   Press when the tip is in the gold zone. */
+#ui .pots-ring {
+  position: absolute; left: 0; top: 0; width: 64px; height: 64px;
+  margin: -32px 0 0 -32px; pointer-events: none;
+  opacity: 0; transition: opacity .2s ease;
+  filter: drop-shadow(0 2px 2px rgba(0,0,0,.5));
+}
+#ui .pots-ring.show { opacity: 1; }
+#ui .pots-ring svg { width: 100%; height: 100%; display: block; overflow: visible; }
+#ui .pots-ring .track { fill: none; stroke: rgba(30,18,10,.55); stroke-width: 7; }
+#ui .pots-ring .zone { fill: none; stroke: #ffcf3d; stroke-width: 7; stroke-linecap: butt; }
+#ui .pots-ring .fill { fill: none; stroke: #f6ecd4; stroke-width: 4.5; stroke-linecap: round; }
+#ui .pots-ring .core { fill: rgba(30,18,10,.35); }
+#ui .pots-ring.hit .zone { stroke: #fff3b0; filter: drop-shadow(0 0 6px #ffd23e); }
+#ui .pots-ring.hit svg { animation: pots-ring-hit .3s ease-out; }
+@keyframes pots-ring-hit { 30% { transform: scale(1.28); } }
+#ui .pots-ring.super .track { stroke: rgba(120,50,10,.7); }
+#ui .pots-ring.super .core { fill: rgba(255,160,40,.55); animation: pots-pulse .5s ease-in-out infinite; }
+#ui .pots-ring.charged .core { fill: rgba(120,220,255,.6); animation: pots-pulse .7s ease-in-out infinite; }
+#ui .pots-ring .tag {
+  position: absolute; left: 50%; top: 100%; transform: translate(-50%, 2px);
+  font-size: 12px; font-weight: 900; letter-spacing: .12em; white-space: nowrap;
+  color: #ffe27a; text-shadow: 0 0 6px rgba(0,0,0,.8), 0 1px 0 #3a1c0c;
+  opacity: 0; transition: opacity .15s ease;
+}
+#ui .pots-ring .tag.show { opacity: 1; }
+#ui .pots-ring .tag.good { color: #d8f0c8; }
+#ui .pots-ring .tag.super { color: #ffb347; }
+#ui .pots-ring .tag.charged { color: #9fe8ff; }
+
+/* Taunt speech bubble over the kid's head */
+#ui .pots-bubble {
+  position: absolute; left: 0; top: 0; transform: translate(-50%, -100%) scale(.7);
+  max-width: 220px; padding: 7px 12px; border-radius: 14px;
+  background: #fffaf0; color: #2c1a0c; border: 2px solid #3a1c0c;
+  font-size: 14px; font-weight: 700; line-height: 1.2; text-align: center;
+  box-shadow: 0 3px 0 rgba(0,0,0,.35);
+  opacity: 0; transition: opacity .12s ease, transform .18s cubic-bezier(.2,1.4,.4,1);
+  pointer-events: none; white-space: normal;
+}
+#ui .pots-bubble::after {
+  content: ''; position: absolute; left: 50%; bottom: -9px; margin-left: -7px;
+  border: 7px solid transparent; border-bottom: 0; border-top-color: #3a1c0c;
+}
+#ui .pots-bubble.show { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+
+#ui .pots-chip.charged { border-color: #9fe8ff; box-shadow: 0 0 14px rgba(120,220,255,.75); }
+#ui .pots-chip .super { color: #0b7aa6; font-weight: 900; letter-spacing: .1em; font-size: 11px; }
 
 /* --- screens ------------------------------------------------------------ */
 #ui .pots-screen {
@@ -409,7 +483,7 @@ export function createUi(ctx: GameCtx): UiApi {
     const hint = document.createElement('div');
     hint.className = 'pots-hint';
     hint.textContent =
-      'Space / SWING = swing · arrows or stick = run & climb · ◀ ▶ at a treetop = zip line · Enter / THROW = throw · M = mute';
+      'Space / SWING = pump (press at each end of the swing for a PERFECT!) · Enter / THROW = throw from the swing — SUPER at the top · on the ground THROW taunts the pirates · arrows or stick = run & climb · ◀ ▶ at a treetop = zip line · M = mute';
     titleScreen.append(h, credit, bestLine, prompt, titleCards.el, hint);
   }
 
@@ -462,6 +536,8 @@ export function createUi(ctx: GameCtx): UiApi {
       ['Cannon-fodder hits', String(s.hits), ''],
       ['Ships sunk', String(s.shipsSunk), ''],
       ['Time a-swinging', mmss(s.swingSeconds), ''],
+      ['Perfect pumps', String(s.perfectPumps), ''],
+      ['Cannonballs dodged', String(s.dodges), ''],
       ['Swingsets found', String(s.swingsetsFound), ''],
       ['Trees climbed', String(s.treesClimbed), ''],
       ['TOTAL', String(s.total), 'total'],
@@ -531,6 +607,34 @@ export function createUi(ctx: GameCtx): UiApi {
   incoming.className = 'pots-incoming';
   incoming.textContent = 'INCOMING!';
   wrap.appendChild(incoming);
+
+  const callout = document.createElement('div');
+  callout.className = 'pots-callout';
+  wrap.appendChild(callout);
+
+  // Pump ring: track, the gold PERFECT zone straddling the top, and the fill
+  // that sweeps clockwise from the top and reaches it at each end of the arc.
+  const RING_R = 26;
+  const RING_C = 2 * Math.PI * RING_R;
+  const zoneFrac = PUMP_PERFECT_PHASE / Math.PI; // each side of the top
+  const ring = document.createElement('div');
+  ring.className = 'pots-ring';
+  ring.innerHTML = `<svg viewBox="0 0 64 64">
+    <circle class="core" cx="32" cy="32" r="21"/>
+    <circle class="track" cx="32" cy="32" r="${RING_R}"/>
+    <circle class="zone" cx="32" cy="32" r="${RING_R}"
+      stroke-dasharray="${(2 * zoneFrac * RING_C).toFixed(2)} ${RING_C.toFixed(2)}"
+      transform="rotate(${(-90 - zoneFrac * 360).toFixed(2)} 32 32)"/>
+    <circle class="fill" cx="32" cy="32" r="${RING_R}"
+      stroke-dasharray="0 ${RING_C.toFixed(2)}" transform="rotate(-90 32 32)"/>
+  </svg><div class="tag"></div>`;
+  wrap.appendChild(ring);
+  const ringFill = ring.querySelector('.fill') as SVGCircleElement;
+  const ringTag = ring.querySelector('.tag') as HTMLElement;
+
+  const bubble = document.createElement('div');
+  bubble.className = 'pots-bubble';
+  wrap.appendChild(bubble);
 
   // --- mute button ---------------------------------------------------------
 
@@ -744,6 +848,48 @@ export function createUi(ctx: GameCtx): UiApi {
     incomingTimer = 0.6;
   });
 
+  let calloutTimer = 0;
+  ctx.events.on('callout', (e) => {
+    if (ctx.screen !== 'playing') return;
+    callout.className = 'pots-callout';
+    void callout.offsetWidth; // restart the pop
+    callout.textContent = e.text;
+    callout.classList.add(e.kind, 'show');
+    calloutTimer = 1.15;
+  });
+
+  let ringHitTimer = 0;
+  let ringTagTimer = 0;
+  ctx.events.on('pumped', (e) => {
+    if (e.quality === 'weak') return;
+    ringHitTimer = 0.3;
+    ring.classList.remove('hit');
+    void ring.offsetWidth;
+    ring.classList.add('hit');
+    ringTag.className = 'tag show ' + (e.quality === 'good' ? 'good' : '');
+    ringTag.textContent = e.quality === 'good' ? 'good' : e.quality === 'kickoff' ? 'GO!' : 'PERFECT!';
+    ringTagTimer = 0.7;
+  });
+
+  let bubbleTimer = 0;
+  ctx.events.on('taunted', (e) => {
+    bubble.textContent = e.line;
+    bubble.classList.add('show');
+    bubbleTimer = 1.8;
+  });
+
+  /** World point → CSS pixels; false when behind the camera. */
+  const projScratch = new THREE.Vector3();
+  function placeAt(el: HTMLElement, x: number, y: number, z: number): boolean {
+    projScratch.set(x, y, z).project(ctx.camera);
+    if (projScratch.z > 1) return false;
+    const px = (projScratch.x * 0.5 + 0.5) * window.innerWidth;
+    const py = (0.5 - projScratch.y * 0.5) * window.innerHeight;
+    el.style.left = `${px.toFixed(1)}px`;
+    el.style.top = `${py.toFixed(1)}px`;
+    return true;
+  }
+
   let shakeTimer = 0;
   ctx.events.on('screenShake', () => {
     hud.classList.remove('shake');
@@ -786,6 +932,10 @@ export function createUi(ctx: GameCtx): UiApi {
       msgTimer = 0;
       incoming.classList.remove('show');
       incomingTimer = 0;
+      callout.classList.remove('show');
+      ring.classList.remove('show');
+      bubble.classList.remove('show');
+      bubbleTimer = 0;
     }
   }
 
@@ -795,6 +945,7 @@ export function createUi(ctx: GameCtx): UiApi {
   let lastRound = -1;
   let lastScore = -1;
   let lastHeld: HeldKind | null | undefined;
+  let lastCharged: boolean | undefined;
   let lastHpSunk: boolean | undefined;
   let lastHpWidth = '';
   let lastJamText = '';
@@ -814,8 +965,30 @@ export function createUi(ctx: GameCtx): UiApi {
       shakeTimer -= dt;
       if (shakeTimer <= 0) hud.classList.remove('shake');
     }
+    if (calloutTimer > 0) {
+      calloutTimer -= dt;
+      if (calloutTimer <= 0) callout.classList.remove('show');
+    }
+    if (ringHitTimer > 0) {
+      ringHitTimer -= dt;
+      if (ringHitTimer <= 0) ring.classList.remove('hit');
+    }
+    if (ringTagTimer > 0) {
+      ringTagTimer -= dt;
+      if (ringTagTimer <= 0) ringTag.classList.remove('show');
+    }
+    if (bubbleTimer > 0) {
+      bubbleTimer -= dt;
+      if (bubbleTimer <= 0) bubble.classList.remove('show');
+    }
 
     if (ctx.screen !== 'playing') return;
+
+    updateRing();
+    if (bubbleTimer > 0) {
+      const p = ctx.player.position;
+      if (!placeAt(bubble, p.x, p.y + 1.55, p.z)) bubble.classList.remove('show');
+    }
 
     if (ctx.hearts !== lastHearts) {
       lastHearts = ctx.hearts;
@@ -860,15 +1033,57 @@ export function createUi(ctx: GameCtx): UiApi {
     }
 
     const held = ctx.tools ? ctx.tools.held : null;
-    if (held !== lastHeld) {
+    const charged = ctx.superCharged && held !== null && held !== 'chainsaw' && held !== 'magnet';
+    if (held !== lastHeld || charged !== lastCharged) {
       lastHeld = held;
+      lastCharged = charged;
       chip.classList.toggle('hidden', held === null);
       chip.classList.toggle('magnetball', held === 'cannonball');
+      chip.classList.toggle('charged', charged);
       if (held) {
         chip.innerHTML = `${toolIcon(held)}<span><span class="lbl">${
           held === 'cannonball' ? 'Magnet caught' : 'Carrying'
-        }</span><b>${TOOL_NAME[held]}</b></span>`;
+        }</span><b>${TOOL_NAME[held]}</b>${
+          charged ? '<span class="super"> ⚡ SUPER READY</span>' : ''
+        }</span>`;
       }
+    }
+  }
+
+  /** The pump ring rides above the kid while swinging; its fill shows the
+   *  beat, its core glows when a throw right now would be SUPER. */
+  let lastRingShown = false;
+  function updateRing(): void {
+    const p = ctx.player;
+    const swing = p.ridingSwing;
+    const show = p.mode === 'swinging' && !!swing && !swing.broken;
+    if (show !== lastRingShown) {
+      lastRingShown = show;
+      ring.classList.toggle('show', show);
+    }
+    if (!show || !swing) return;
+    const pos = p.position;
+    if (!placeAt(ring, pos.x, pos.y + 1.9, pos.z)) {
+      ring.classList.remove('show');
+      lastRingShown = false;
+      return;
+    }
+    const r = swing.pumpReadiness();
+    ringFill.setAttribute('stroke-dasharray', `${(r * RING_C).toFixed(2)} ${RING_C.toFixed(2)}`);
+    const held = ctx.tools.held;
+    const throwable = held !== null && held !== 'chainsaw' && held !== 'magnet';
+    // A banked Dodge shows even empty-handed (go grab a Tool!); the
+    // top-of-the-swing window only matters with something to throw.
+    const charged = ctx.superCharged;
+    const superNow = charged || (throwable && ctx.throwPower === 'super');
+    ring.classList.toggle('super', superNow && !charged);
+    ring.classList.toggle('charged', charged);
+    if (superNow && ringTagTimer <= 0) {
+      // The SUPER window is open: say so under the ring (PERFECT! wins).
+      ringTag.className = 'tag show ' + (charged ? 'charged' : 'super');
+      ringTag.textContent = charged ? 'SUPER READY' : 'SUPER!';
+    } else if (!superNow && ringTagTimer <= 0 && ringTag.classList.contains('show')) {
+      ringTag.classList.remove('show');
     }
   }
 
