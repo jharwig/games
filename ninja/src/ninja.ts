@@ -1,6 +1,7 @@
 // =============================================================================
-// the ninja: the blocky character model, her outfits, the pose system (run,
-// air tricks, hangs, climbs, celebration), the ponytail and the blob shadow
+// the ninja: the blocky character model, the characters (who she is: hair,
+// colors, clothes), the pose system (run, air tricks, hangs, climbs,
+// celebration), the swinging hair and the blob shadow
 // =============================================================================
 import * as THREE from "three";
 import { sfxStep } from "./audio";
@@ -37,13 +38,15 @@ ninjaBody.position.y = -1.0;
 ninjaFlip.add(ninjaBody);
 scene.add(ninja);
 
-// every recolorable piece is kept in `wear` so an outfit can restyle it
+// every recolorable piece is kept in `wear` so a character can restyle it
 const wear = {
   skin: [] as THREE.Mesh[], hair: [] as THREE.Mesh[], eyes: [] as THREE.Mesh[], shirt: [] as THREE.Mesh[],
   skirt: [] as THREE.Mesh[], shorts: [] as THREE.Mesh[], socks: [] as THREE.Mesh[], shoes: [] as THREE.Mesh[],
-  belt: null as unknown as THREE.Mesh, band: null as unknown as THREE.Mesh, tie: null as unknown as THREE.Mesh,
-  pony: [] as THREE.Object3D[]
+  belt: null as unknown as THREE.Mesh, band: null as unknown as THREE.Mesh, ties: [] as THREE.Mesh[],
+  // the parts that belong to one hair style, shown only while it is worn
+  styles: { short: [], pony: [], braids: [], long: [] } as Record<HairStyle, THREE.Object3D[]>
 };
+export type HairStyle = "short" | "pony" | "braids" | "long";
 
 const legL = limb(ninjaBody, -0.17, 0.74, 0.26, 0.74, 0.26, SKIN);
 const legR = limb(ninjaBody,  0.17, 0.74, 0.26, 0.74, 0.26, SKIN);
@@ -73,56 +76,98 @@ wear.skin.push(box(head, 0, 0, 0, 0.52, 0.52, 0.5, SKIN, true));
 wear.band = box(head, 0, 0.14, 0, 0.56, 0.16, 0.54, BAND, true);                 // headband
 wear.eyes.push(box(head, -0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false));  // eyes
 wear.eyes.push(box(head,  0.13, 0.0, 0.26, 0.09, 0.11, 0.04, 0x18202e, false));
-wear.hair.push(box(head, 0, 0.3, 0.02, 0.5, 0.14, 0.46, 0x25313f, true));        // hair top
-const ponyBase = box(head, 0, 0.28, -0.28, 0.2, 0.2, 0.16, 0x25313f, true);      // ponytail base
-wear.hair.push(ponyBase);
-// the ponytail hangs from two hinged segments so it can swing and whip
-const pony = new THREE.Group();
-pony.position.set(0, 0.28, -0.28);
-head.add(pony);
-wear.tie = box(pony, 0, 0.02, -0.05, 0.22, 0.1, 0.1, BAND, true);                // hair tie
-wear.hair.push(box(pony, 0, -0.22, -0.12, 0.16, 0.34, 0.14, 0x25313f, true));    // ponytail, upper
-const ponyTip = new THREE.Group();
-ponyTip.position.set(0, -0.38, -0.14);
-pony.add(ponyTip);
-wear.hair.push(box(ponyTip, 0, -0.14, -0.02, 0.13, 0.3, 0.11, 0x25313f, true));  // ponytail, tip
-wear.pony.push(ponyBase, pony);
+wear.hair.push(box(head, 0, 0.3, 0.02, 0.5, 0.14, 0.46, 0x25313f, true));        // hair top (every style)
+// a hanging hair piece: two hinged segments (upper + tip) so it can swing and
+// whip. The ponytail is one at the back; braids are one at each side
+interface Swinger { root: THREE.Group; tip: THREE.Group; }
+function swinger(x: number, y: number, z: number, w: number, style: HairStyle, tie: boolean): Swinger {
+  const root = new THREE.Group();
+  root.position.set(x, y, z);
+  head.add(root);
+  const base = box(head, x, y, z, w + 0.04, w + 0.04, w, 0x25313f, true);        // where it sprouts from the head
+  wear.hair.push(base);
+  if (tie) wear.ties.push(box(root, 0, 0.02, -0.05, w + 0.06, 0.1, 0.1, BAND, true));
+  wear.hair.push(box(root, 0, -0.22, -0.12, w, 0.34, w - 0.02, 0x25313f, true));  // upper segment
+  const tip = new THREE.Group();
+  tip.position.set(0, -0.38, -0.14);
+  root.add(tip);
+  wear.hair.push(box(tip, 0, -0.14, -0.02, w - 0.03, 0.3, w - 0.05, 0x25313f, true));  // tip
+  wear.styles[style].push(base, root);
+  return { root, tip };
+}
+const pony = swinger(0, 0.28, -0.28, 0.16, "pony", true);
+const braids = [swinger(-0.3, 0.2, -0.1, 0.12, "braids", true), swinger(0.3, 0.2, -0.1, 0.12, "braids", true)];
+// long hair: drapes down both sides of the face, and a back sheet that sways
+// a little with the ponytail follower
+wear.styles.long.push(
+  ...[-0.3, 0.3].map(function (x) { const m = box(head, x, -0.06, -0.04, 0.1, 0.6, 0.36, 0x25313f, true); wear.hair.push(m); return m; })
+);
+const longBack = new THREE.Group();
+longBack.position.set(0, 0.3, -0.24);
+head.add(longBack);
+wear.hair.push(box(longBack, 0, -0.34, -0.06, 0.5, 0.74, 0.1, 0x25313f, true));
+wear.styles.long.push(longBack);
 
 ninja.traverse(function (o) { if ((o as THREE.Mesh).isMesh) { o.castShadow = true; o.receiveShadow = false; } });
 
-// -------- outfits (drawn on paper, colored in here) --------
+// -------- characters (drawn on paper, colored in here) --------
 // skirt: null means shorts only; socks/shoes: null means bare feet; band: null hides the headband
-interface Outfit {
+export interface Character {
   name: string;
-  skin: number; hair: number; tie: number; band: number | null; eyes: number;
+  skin: number; hair: number; hairStyle: HairStyle; tie: number; band: number | null; eyes: number;
   shirt: number; belt: number; skirt: number | null; shorts: number;
-  socks: number | null; shoes: number | null; pony: boolean;
+  socks: number | null; shoes: number | null;
 }
-const OUTFITS: Outfit[] = [
+export const CHARACTERS: Character[] = [
   { name: "Gemma",
-    skin: 0xd18f5f, hair: 0x8e3b28, tie: 0xb04430, band: 0x8e3b28, eyes: 0x2e62c8,
+    skin: 0xd18f5f, hair: 0x8e3b28, hairStyle: "pony", tie: 0xb04430, band: 0x8e3b28, eyes: 0x2e62c8,
     shirt: 0x23262b, belt: 0x16181d, skirt: 0x2f63e8, shorts: 0x2f63e8,
-    socks: 0x6d2fd6, shoes: 0x101216, pony: true },
-  { name: "Scout",
-    skin: 0xf3ac6a, hair: 0x77492a, tie: 0x77492a, band: null, eyes: 0x10161e,
+    socks: 0x6d2fd6, shoes: 0x101216 },
+  { name: "Arthur",
+    skin: 0xf3ac6a, hair: 0x77492a, hairStyle: "short", tie: 0x77492a, band: null, eyes: 0x10161e,
     shirt: 0x4d9e45, belt: 0x4d9e45, skirt: null, shorts: 0x2e7fd6,
-    socks: null, shoes: null, pony: false }
+    socks: null, shoes: null },
+  { name: "Anya",
+    skin: 0xe9b27c, hair: 0x6b3f22, hairStyle: "braids", tie: 0x6b3f22, band: null, eyes: 0x10161e,
+    shirt: 0x2447c6, belt: 0x2447c6, skirt: null, shorts: 0x3fb2ea,
+    socks: null, shoes: 0x101216 },
+  { name: "Priella",
+    skin: 0xe9b27c, hair: 0x6b3f22, hairStyle: "braids", tie: 0x6b3f22, band: null, eyes: 0x10161e,
+    shirt: 0x2f8f3c, belt: 0x2f8f3c, skirt: null, shorts: 0x2aa7c9,
+    socks: null, shoes: 0x101216 },
+  { name: "Genevieve",
+    skin: 0xe9b27c, hair: 0x5a3219, hairStyle: "long", tie: 0x5a3219, band: null, eyes: 0x10161e,
+    shirt: 0x5b55d8, belt: 0x5b55d8, skirt: null, shorts: 0x5a1d90,
+    socks: null, shoes: 0xc4324f },
+  { name: "Alex",
+    skin: 0xf0b57e, hair: 0x6e4326, hairStyle: "short", tie: 0x6e4326, band: null, eyes: 0x2aa3b8,
+    shirt: 0x2a63d9, belt: 0x2a63d9, skirt: null, shorts: 0x35a9d9,
+    socks: null, shoes: 0x8a5a38 }
 ];
 
-let outfitIdx = parseInt(storeGet("ninja.outfit", "0"), 10);
-if (!(outfitIdx >= 0 && outfitIdx < OUTFITS.length)) outfitIdx = 0;
+// the pick is saved by name (older saves held a position in the original
+// Gemma/Scout list); anything unknown means a brand-new player
+function storedCharacter(): number {
+  const v = storeGet("ninja.outfit", "");
+  const byName = CHARACTERS.findIndex(function (c) { return c.name === v; });
+  if (byName >= 0) return byName;
+  if (v === "0") return 0;
+  if (v === "1") return 1;
+  return -1;
+}
+let characterIdx = storedCharacter();
 
-export function applyOutfit(i: number): void {
-  outfitIdx = i;
-  const o = OUTFITS[i];
+export function applyCharacter(i: number): void {
+  characterIdx = i;
+  const o = CHARACTERS[i];
   function paint(list: THREE.Mesh[], hex: number): void { for (let j = 0; j < list.length; j++) list[j].material = mat(hex); }
   paint(wear.skin, o.skin);
   paint(wear.hair, o.hair);
   paint(wear.eyes, o.eyes);
   paint(wear.shirt, o.shirt);
   paint(wear.shorts, o.shorts);
+  paint(wear.ties, o.tie);
   wear.belt.material = mat(o.belt);
-  wear.tie.material = mat(o.tie);
   for (let j = 0; j < wear.skirt.length; j++) {
     wear.skirt[j].visible = o.skirt !== null;
     if (o.skirt !== null) wear.skirt[j].material = mat(o.skirt);
@@ -134,14 +179,16 @@ export function applyOutfit(i: number): void {
   paint(wear.shoes, o.shoes !== null ? o.shoes : o.skin);
   wear.band.visible = o.band !== null;
   if (o.band !== null) wear.band.material = mat(o.band);
-  for (let j = 0; j < wear.pony.length; j++) wear.pony[j].visible = o.pony;
-  storeSet("ninja.outfit", String(i));
-  const btns = document.querySelectorAll<HTMLElement>(".outfitBtn");
+  for (const style of Object.keys(wear.styles) as HairStyle[]) {
+    for (const part of wear.styles[style]) part.visible = style === o.hairStyle;
+  }
+  storeSet("ninja.outfit", o.name);
+  const btns = document.querySelectorAll<HTMLElement>(".charBtn");
   for (let j = 0; j < btns.length; j++) btns[j].classList.toggle("selected", +(btns[j].dataset.i || -1) === i);
 }
 
-// a little paper-doll preview of the outfit for the buttons
-function drawOutfitPreview(cv: HTMLCanvasElement, o: Outfit): void {
+// a little paper-doll preview of the character for the buttons
+function drawCharacterPreview(cv: HTMLCanvasElement, o: Character): void {
   const s = 2;
   cv.width = 44 * s; cv.height = 62 * s;
   const c = cv.getContext("2d")!;
@@ -152,7 +199,10 @@ function drawOutfitPreview(cv: HTMLCanvasElement, o: Outfit): void {
   r(12, 3, 20, 7, o.hair);                        // hair
   r(12, 3, 3, 10, o.hair);
   r(29, 3, 3, 10, o.hair);
-  if (o.pony) r(31, 8, 4, 16, o.hair);            // ponytail
+  if (o.hairStyle === "pony") r(31, 8, 4, 16, o.hair);                            // ponytail
+  if (o.hairStyle === "braids") { r(10, 8, 3, 18, o.hair); r(31, 8, 3, 18, o.hair);   // braids
+    r(10, 19, 3, 2, o.tie); r(31, 19, 3, 2, o.tie); }
+  if (o.hairStyle === "long") { r(10, 8, 4, 24, o.hair); r(30, 8, 4, 24, o.hair); }  // long hair
   r(17, 13, 3, 4, o.eyes);                        // eyes
   r(24, 13, 3, 4, o.eyes);
   r(13, 21, 18, 15, o.shirt);                     // torso
@@ -177,14 +227,22 @@ function drawOutfitPreview(cv: HTMLCanvasElement, o: Outfit): void {
   else { r(15, 54, 5, 5, o.skin); r(24, 54, 5, 5, o.skin); }    // bare feet
 }
 
-function buildOutfitButtons(container: HTMLElement, onPick: () => void): void {
-  OUTFITS.forEach(function (o, i) {
+// the picker order is shuffled once per load, so nobody is always first
+const pickOrder = CHARACTERS.map(function (_, i) { return i; });
+for (let i = pickOrder.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  const t = pickOrder[i]; pickOrder[i] = pickOrder[j]; pickOrder[j] = t;
+}
+
+function buildCharacterButtons(container: HTMLElement, onPick: () => void): void {
+  pickOrder.forEach(function (i) {
+    const o = CHARACTERS[i];
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "outfitBtn";
+    b.className = "charBtn";
     b.dataset.i = String(i);
     const cv = document.createElement("canvas");
-    drawOutfitPreview(cv, o);
+    drawCharacterPreview(cv, o);
     b.appendChild(cv);
     const nm = document.createElement("span");
     nm.textContent = o.name;
@@ -193,7 +251,7 @@ function buildOutfitButtons(container: HTMLElement, onPick: () => void): void {
     b.addEventListener("pointerdown", function (e) {
       e.stopPropagation();
       e.preventDefault();
-      applyOutfit(i);
+      applyCharacter(i);
       onPick();
     }, { passive: false });
     b.addEventListener("click", function (e) { e.stopPropagation(); });
@@ -201,10 +259,11 @@ function buildOutfitButtons(container: HTMLElement, onPick: () => void): void {
   });
 }
 
-// builds the outfit pickers and dresses the ninja in the stored outfit
-export function initOutfits(containers: HTMLElement[], onPick: () => void): void {
-  for (const c of containers) buildOutfitButtons(c, onPick);
-  applyOutfit(outfitIdx);
+// builds the character pickers and dresses the ninja in the saved character
+// (a brand-new player gets whoever the shuffle put first)
+export function initCharacters(containers: HTMLElement[], onPick: () => void): void {
+  for (const c of containers) buildCharacterButtons(c, onPick);
+  applyCharacter(characterIdx >= 0 ? characterIdx : pickOrder[0]);
 }
 
 let squashT = 0;    // seconds of landing squash left
@@ -494,7 +553,8 @@ export function idleNinja(dt: number): void {
 }
 
 // =============================================================================
-// ponytail: a two-segment lagged follower that trails the body's motion
+// hair: a two-segment lagged follower that trails the body's motion; drives
+// the ponytail, both braids and the sway of long hair
 // =============================================================================
 let ponyAng = 0, ponyTipAng = 0;
 
@@ -513,9 +573,13 @@ export function updatePony(dt: number, falling: boolean): void {
   }
   ponyAng = damp(ponyAng, target, 9, dt);
   ponyTipAng = damp(ponyTipAng, ponyAng, 6.5, dt);
-  pony.rotation.x = ponyAng;
   // the tip whips by however far it lags behind the upper segment
-  ponyTip.rotation.x = clamp((ponyAng - ponyTipAng) * 2.2, -0.9, 0.9);
+  const tipAng = clamp((ponyAng - ponyTipAng) * 2.2, -0.9, 0.9);
+  for (const h of [pony, braids[0], braids[1]]) {
+    h.root.rotation.x = ponyAng;
+    h.tip.rotation.x = tipAng;
+  }
+  longBack.rotation.x = ponyAng * 0.5;
 }
 
 export function syncNinja(dt: number): void {

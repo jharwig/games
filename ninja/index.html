@@ -170,13 +170,13 @@
   }
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-  /* outfit picker */
-  .outfitLbl {
+  /* pickers: course mode + character */
+  .pickLbl {
     font-weight: 900; font-size: 13px; letter-spacing: 0.09em;
     color: #16324f; text-transform: uppercase; margin: 0 0 8px;
   }
-  .outfitRow { display: flex; gap: 14px; justify-content: center; }
-  .outfitBtn, .modeBtn {
+  .pickRow { display: flex; gap: 14px; justify-content: center; }
+  .charBtn, .modeBtn {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     padding: 8px 12px 6px;
     background: rgba(255,255,255,0.9);
@@ -187,26 +187,28 @@
     touch-action: manipulation;
     font: inherit;
   }
-  .outfitBtn:active, .modeBtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(22,50,79,0.25); }
-  .outfitBtn.selected, .modeBtn.selected { border-color: #ff2e88; background: #fff; box-shadow: 0 3px 0 rgba(255,46,136,0.35); }
-  .outfitBtn canvas { width: 44px; height: 62px; image-rendering: pixelated; }
-  .outfitBtn span, .modeBtn span {
+  .charBtn:active, .modeBtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(22,50,79,0.25); }
+  .charBtn.selected, .modeBtn.selected { border-color: #ff2e88; background: #fff; box-shadow: 0 3px 0 rgba(255,46,136,0.35); }
+  .charBtn canvas { width: 44px; height: 62px; image-rendering: pixelated; }
+  .charBtn span, .modeBtn span {
     font-size: 11px; font-weight: 800; letter-spacing: 0.07em;
     color: #16324f; text-transform: uppercase;
   }
-  #titleOutfits { margin: 0 0 14px; }
+  /* six characters wrap to two rows of three */
+  #titleChars, #podiumChars { flex-wrap: wrap; max-width: 300px; margin-left: auto; margin-right: auto; }
+  #titleChars { margin-bottom: 14px; }
   /* course mode picker: straight line or a spiral up a tower */
   .modeBtn { min-width: 84px; padding: 6px 12px 6px; }
   .modeBtn b { font-size: 22px; line-height: 1.1; color: #16324f; }
   #titleModes { margin: 0 0 14px; }
-  #outfitPick {
+  #charPick {
     position: fixed; left: 0; right: 0;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
     display: none; flex-direction: column; align-items: center;
     z-index: 9; text-align: center;
   }
-  #outfitPick.visible { display: flex; }
-  #outfitPick .outfitLbl { color: #fff; text-shadow: 2px 2px 0 #16324f; }
+  #charPick.visible { display: flex; }
+  #charPick .pickLbl { color: #fff; text-shadow: 2px 2px 0 #16324f; }
 
   /* level banner */
   #banner {
@@ -313,9 +315,9 @@
 
 <div id="fallMsg">WHOOPS!</div>
 
-<div id="outfitPick">
-  <div class="outfitLbl">Pick an outfit</div>
-  <div id="podiumOutfits" class="outfitRow"></div>
+<div id="charPick">
+  <div class="pickLbl">Pick a character</div>
+  <div id="podiumChars" class="pickRow"></div>
 </div>
 
 <div id="title" class="overlay visible">
@@ -329,13 +331,13 @@
       <b>M</b><span>Mute / unmute</span>
       <b>Touch</b><span>Hold left half to run, tap right half to jump</span>
     </div>
-    <div class="outfitLbl">Pick a course</div>
-    <div id="titleModes" class="outfitRow">
+    <div class="pickLbl">Pick a course</div>
+    <div id="titleModes" class="pickRow">
       <button type="button" class="modeBtn" data-mode="straight"><b>&rarr;</b><span>Straight</span></button>
       <button type="button" class="modeBtn" data-mode="tower"><b>&#8635;</b><span>Tower</span></button>
     </div>
-    <div class="outfitLbl">Pick an outfit</div>
-    <div id="titleOutfits" class="outfitRow"></div>
+    <div class="pickLbl">Pick a character</div>
+    <div id="titleChars" class="pickRow"></div>
     <p id="titleBest">BEST RUN: 0 PODIUMS</p>
     <div id="startHint">Press anything to start</div>
   </div>

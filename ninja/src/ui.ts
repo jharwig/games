@@ -27,9 +27,9 @@ export const bannerSub = el("bannerSub");
 export const fallMsg = el("fallMsg");
 export const touchHints = el("touchHints");
 export const tipEl = el("tip");
-export const outfitPickEl = el("outfitPick");
-export const titleOutfits = el("titleOutfits");
-export const podiumOutfits = el("podiumOutfits");
+export const charPickEl = el("charPick");
+export const titleChars = el("titleChars");
+export const podiumChars = el("podiumChars");
 
 let lastTimeStr = "";
 export function updateHud(level: number, best: number, levelTime: number): void {
@@ -73,11 +73,11 @@ export function showBanner(kind: Medal, podiums: number, t: number, par: number)
   bannerEl.classList.remove("visible");
   void bannerEl.offsetWidth;    // restart the pop animation
   bannerEl.classList.add("visible");
-  outfitPickEl.classList.add("visible");
+  charPickEl.classList.add("visible");
 }
 export function hideBanner(): void {
   bannerEl.classList.remove("visible");
-  outfitPickEl.classList.remove("visible");
+  charPickEl.classList.remove("visible");
 }
 
 // title card -> playing

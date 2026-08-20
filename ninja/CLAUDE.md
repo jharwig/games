@@ -43,9 +43,12 @@ same distance around a helix. Everything that builds scenery goes through
   up the lip, hands catch the edge (body hanging below it), pull-up onto
   the summit.
 - `player.ts` — the `player` state object, `Grab` types, air tricks.
-- `ninja.ts` — the character model, outfits (+ paper-doll picker buttons),
-  pose system (run / air / hang / rail / climb / celebrate / idle), ponytail,
-  blob shadow.
+- `ninja.ts` — the character model, the six characters (`CHARACTERS`: skin/
+  hair/clothes colors + hair style, each drawn by the designer; paper-doll
+  picker buttons, shuffled per load, saved by name), pose system (run / air /
+  hang / rail / climb / celebrate / idle), swinging hair (ponytail, braids,
+  long), blob shadow. Vocabulary in `CONTEXT.md` (it's "character", not
+  "outfit").
 - `camera.ts` — chase camera (course coords), impact shake/dip, FOV.
 - `input.ts` — keyboard + touch/mouse (left half runs, right half jumps),
   `input` flags, jump buffering.
@@ -56,7 +59,7 @@ same distance around a helix. Everything that builds scenery goes through
   medals, tips, banner, title, mode buttons).
 
 `localStorage` keys: `ninja.mode`, `ninja.best`, `ninja.best.tower`,
-`ninja.outfit`, `ninja.muted`. URL flags: `?mode=tower`, `?auto` (self-play
+`ninja.outfit` (the character's name), `ninja.muted`. URL flags: `?mode=tower`, `?auto` (self-play
 demo).
 
 ## Testing flags

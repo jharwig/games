@@ -21,7 +21,7 @@ import {
 import { camera, renderer, resizeRenderer, scene, updateSun } from "./gfx";
 import { autoForward, input, pressJump, setupInput } from "./input";
 import {
-  idleNinja, initOutfits, landSquash, poseAir, poseCelebrate, poseClimb, poseHang, poseLedge,
+  idleNinja, initCharacters, landSquash, poseAir, poseCelebrate, poseClimb, poseHang, poseLedge,
   poseRail, poseRun, poseWallRun, snapshotPose, syncNinja, tickPoseBlend, updateBlob, updatePony
 } from "./ninja";
 import { burstConfetti, puff, updateConfetti, updateDust } from "./particles";
@@ -75,7 +75,7 @@ setupInput({
   toggleMute: toggleMute
 });
 
-initOutfits([ui.titleOutfits, ui.podiumOutfits], function () {
+initCharacters([ui.titleChars, ui.podiumChars], function () {
   // give a moment on the podium to admire the new look
   if (state === State.CELEBRATE) celebrateT = Math.min(celebrateT, 0.4);
 });

@@ -48,6 +48,10 @@ Pick a course on the title screen:
 - **Straight** — the course runs in a straight line through the sky.
 - **Tower** — the course spirals up and around a tower: every obstacle climbs a little higher, and each level keeps winding up the same coil. The camera rides around with you.
 
+### Characters
+
+Pick who you play as on the title screen (or at any podium): **Gemma, Arthur, Anya, Priella, Genevieve, or Alex** — each drawn by the designer, with their own hair and clothes. The picker shuffles every time you load the game, and your pick is remembered.
+
 ### Controls
 
 - **Hold W / Up** — run (on touch, hold the left half of the screen)
