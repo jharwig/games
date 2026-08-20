@@ -7,12 +7,12 @@ to `main` (https://jharwig.github.io/games/). The root is a PWA shell:
 ## Layout
 
 - Each game lives in its own top-level directory.
-- Simple games are a single self-contained `index.html` (ninja).
-- Complex games may be multi-file built apps with a `package.json` (sail, block,
-  beedraw). The deploy workflow (`.github/workflows/deploy.yml`) auto-builds any
-  top-level directory containing a `package.json` and publishes its `dist/`.
-- `sail/`, `block/` and `beedraw/` have their own `CLAUDE.md` — read it before
-  working there.
+- Simple games may be a single self-contained `index.html`.
+- Built games are multi-file Vite apps with a `package.json` (sail, block,
+  beedraw, swingset, ninja). The deploy workflow
+  (`.github/workflows/deploy.yml`) auto-builds any top-level directory
+  containing a `package.json` and publishes its `dist/`.
+- Each built game has its own `CLAUDE.md` — read it before working there.
 
 ## Adding a new game
 
@@ -21,7 +21,7 @@ to `main` (https://jharwig.github.io/games/). The root is a PWA shell:
 2. Use TypeScript for new projects (Vite app like `sail/`) to keep code
    organized and type-safe.
 3. 3D games fade scenery that gets close to the camera so it never blocks
-   the view of the player — see `updateNearFade` in `ninja/index.html` for
+   the view of the player — see `updateNearFade` in `ninja/src/course.ts` for
    the reference implementation.
 4. Update all three of: `index.html` (hub card), `sw.js` (PRECACHE list —
    built apps are precached automatically by the workflow, static files are
