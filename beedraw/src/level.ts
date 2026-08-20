@@ -259,6 +259,23 @@ function tryGen(level: number, seed: number): Level {
     }
     return true;
   }
+  // the last placed rock must either overlap the animal's no-draw circle
+  // (the line simply ties to it) or leave a corridor wide enough to draw
+  // through - never a visible slot the stroke cannot fit
+  function slotOK(): boolean {
+    const rk = L.rocks[L.rocks.length - 1];
+    const dir = Math.atan2(rk.y - L.ay, rk.x - L.ax);
+    for (let a = -1.1; a <= 1.1; a += 0.1) {
+      const ca = Math.cos(dir + a), sa = Math.sin(dir + a);
+      for (let w = 2; w < 16; w += 2) {
+        if (pointInRock(L, L.ax + ca * (ANIM_NODRAW + w), L.ay + sa * (ANIM_NODRAW + w), 4)) {
+          if (!pointInRock(L, L.ax + ca * (ANIM_NODRAW + 1), L.ay + sa * (ANIM_NODRAW + 1), 4)) return false;
+          break;
+        }
+      }
+    }
+    return true;
+  }
 
   // ---- anchor rocks: the posts the player ties the line to ----
   if (n >= 3) {
@@ -272,6 +289,7 @@ function tryGen(level: number, seed: number): Level {
         y = L.ay + Math.sin(ang) * rad;
         if (!rockClear(x, y, 74)) continue;
         addRock(x, y, 0.8 + r() * 0.25);
+        if (!slotOK()) { L.rocks.pop(); continue; }
         break;
       }
     }

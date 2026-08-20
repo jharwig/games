@@ -218,6 +218,27 @@ function clampToValid(ax: number, ay: number, bx: number, by: number): { x: numb
   return got ? { x: lastX, y: lastY } : null;
 }
 
+// the straight path to the pointer is blocked - feel around the obstacle and
+// keep the tip moving along its edge toward the pointer instead of freezing
+function slidePoint(last: { x: number; y: number }, x: number, y: number): { x: number; y: number } | null {
+  const dx = x - last.x, dy = y - last.y;
+  const d = Math.sqrt(dx * dx + dy * dy) || 1;
+  const ux = dx / d, uy = dy / d;
+  const step = Math.min(d, 7);
+  let best: { x: number; y: number } | null = null;
+  let bestD = d - 0.4;                  // must actually approach the pointer
+  const angs = [0.45, -0.45, 0.9, -0.9, 1.3, -1.3];
+  for (let i = 0; i < angs.length; i++) {
+    const ca = Math.cos(angs[i]), sa = Math.sin(angs[i]);
+    const p = clampToValid(last.x, last.y,
+      last.x + (ux * ca - uy * sa) * step, last.y + (ux * sa + uy * ca) * step);
+    if (!p) continue;
+    const pd = Math.sqrt(dist2(p.x, p.y, x, y));
+    if (pd < bestD) { bestD = pd; best = p; }
+  }
+  return best;
+}
+
 function addInkPoint(x: number, y: number): void {
   if (inkLeft <= 0) return;
   if (stroke.length === 0) {
@@ -230,9 +251,13 @@ function addInkPoint(x: number, y: number): void {
   const d = Math.sqrt(dist2(x, y, last.x, last.y));
   if (d < 2) return;
   let p = clampToValid(last.x, last.y, x, y);
-  if (!p) return;                       // the pointer sits inside an obstacle
-  let seg = Math.sqrt(dist2(p.x, p.y, last.x, last.y));
-  if (seg < 1) return;
+  let seg = p ? Math.sqrt(dist2(p.x, p.y, last.x, last.y)) : 0;
+  if (!p || seg < 1) {                  // blocked - slide along the obstacle
+    p = slidePoint(last, x, y);
+    if (!p) return;
+    seg = Math.sqrt(dist2(p.x, p.y, last.x, last.y));
+    if (seg < 1) return;
+  }
   if (seg > inkLeft) {                  // out of ink - stop at the budget
     const f = inkLeft / seg;
     p = { x: last.x + (p.x - last.x) * f, y: last.y + (p.y - last.y) * f };
