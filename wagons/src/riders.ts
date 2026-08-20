@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { clone as skeletonClone } from 'three/examples/jsm/utils/SkeletonUtils.js';
-import { LANE_MAX, LANE_MIN, PALETTE, SPAWN_RADIUS } from './constants';
+import { HORSE_DOWN_TIME, LANE_MAX, LANE_MIN, PALETTE, SPAWN_RADIUS } from './constants';
 import { ringPos, scene, yaw, yawAngle, camera } from './gfx';
 import { dust, hitPuff, muzzleSmoke } from './particles';
 import { spawnRagdoll, type Binder, type Segment, type SegmentPose, segmentQuat } from './ragdoll';
@@ -365,6 +365,9 @@ export class Rider {
   joints = ridingJoints();
   hitRider: THREE.Mesh; hitHorse: THREE.Mesh; hitHead: THREE.Mesh;
   riderless = false;
+  downT = 0;      // >0 while the Horse is down (shot), counting down
+  downF = 0;      // 0..1 how far down the Horse is right now
+  downDust = false;
   opts: RiderOpts;
   dustTimer = 0;
   fadeT = 0;
@@ -386,11 +389,12 @@ export class Rider {
     rv.pose(this.joints);
     // hitboxes
     const invis = new THREE.MeshBasicMaterial({ visible: false });
-    this.hitRider = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.0, 0.5), invis); this.hitRider.position.set(0, 0.25, 0.08);
-    this.hitHead = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.32, 0.28), invis); this.hitHead.position.set(0, 0.7, 0.05);
+    // generous on purpose: the targets are small, fast and far, and a near miss feels like a hit
+    this.hitRider = new THREE.Mesh(new THREE.BoxGeometry(0.85, 1.15, 0.8), invis); this.hitRider.position.set(0, 0.28, 0.08);
+    this.hitHead = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.44, 0.44), invis); this.hitHead.position.set(0, 0.74, 0.05);
     this.hitRider.userData = { kind: 'rider', rider: this }; this.hitHead.userData = { kind: 'rider', rider: this, head: true };
     rv.frame.add(this.hitRider, this.hitHead);
-    this.hitHorse = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.0, 2.1), invis); this.hitHorse.position.set(0, 1.05, 0.05);
+    this.hitHorse = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.4, 2.5), invis); this.hitHorse.position.set(0, 1.0, 0.05);
     this.hitHorse.userData = { kind: 'horse', rider: this };
     this.horse.group.add(this.hitHorse);
     if (this.hanger) rv.frame.rotation.z = this.dir * 1.15;
@@ -404,6 +408,7 @@ export class Rider {
     const dx = -Math.sin(this.angle) * this.dir, dz = -Math.cos(this.angle) * this.dir;
     this.vel.set(dx, 0, dz).multiplyScalar(this.speed);
     this.horse.group.position.copy(this.pos);
+    this.horse.group.rotation.x = 0;
     this.horse.group.rotation.y = Math.atan2(dx, dz);
     // lean into the turn
     this.horse.group.rotation.z = -this.dir * 0.08 * (this.speed / 11) * (18 / Math.max(this.radius, 8));
@@ -442,10 +447,22 @@ export function updateRiders(dt: number, ev: RiderEvents) {
     const r = riders[i];
     if (r.state === 'gone') { riders.splice(i, 1); continue; }
     if (r.state === 'fallen') {
-      // riderless horse: spiral out and away, then fade
-      r.radius += dt * 6;
-      r.speed = lerp(r.speed, 13, dt);
-      if (r.radius > 70) { r.fadeT += dt; r.horse.fade(1 - r.fadeT); if (r.fadeT >= 1) { r.horse.dispose(); r.state = 'gone'; continue; } }
+      if (r.downT > 0) {
+        // a shot Horse: skids down, lies a moment, gets back up
+        r.downT -= dt;
+        const e = HORSE_DOWN_TIME - r.downT;
+        const f = e < 0.35 ? e / 0.35 : e < 1.5 ? 1 : clamp(1 - (e - 1.5) / (HORSE_DOWN_TIME - 1.5), 0, 1);
+        r.downF = f * f * (3 - 2 * f);
+        r.speed = e < 1.5 ? lerp(r.speed, 0, 1 - Math.exp(-dt * 7)) : lerp(r.speed, 7, 1 - Math.exp(-dt * 2));
+        if (e < 0.5) r.radius += dt * 3; // slides outward as it goes down
+        if (!r.downDust && e >= 0.25) { r.downDust = true; dust(r.pos, 22, 2.6); }
+      } else {
+        // riderless horse: spiral out and away, then fade
+        r.downF = 0;
+        r.radius += dt * 6;
+        r.speed = lerp(r.speed, 13, dt);
+        if (r.radius > 70) { r.fadeT += dt; r.horse.fade(1 - r.fadeT); if (r.fadeT >= 1) { r.horse.dispose(); r.state = 'gone'; continue; } }
+      }
     } else if (r.state === 'arriving') {
       r.radius = lerp(r.radius, r.laneRadius, 1 - Math.exp(-dt * 0.7));
       if (Math.abs(r.radius - r.laneRadius) < 1.5) { r.state = 'riding'; }
@@ -460,10 +477,16 @@ export function updateRiders(dt: number, ev: RiderEvents) {
     r.angle = (r.angle + w * dt + TAU) % TAU;
     r.phase += dt * (r.speed / 11) * 9.5;
     r.place();
+    if (r.downF > 0) {
+      // down on its side: nose dips, rolls toward the outside of the Ring, drops to the dirt
+      r.horse.group.rotation.x = r.downF * 0.5;
+      r.horse.group.rotation.z += r.dir * r.downF * 1.0;
+      r.horse.group.position.y = -r.downF * 0.7;
+    }
     r.horse.update(dt, r.speed, r.phase);
     // hoof dust
     r.dustTimer -= dt;
-    if (r.dustTimer <= 0 && r.radius < 50) {
+    if (r.dustTimer <= 0 && r.radius < 50 && r.speed > 2) {
       r.dustTimer = 0.14;
       const hs = r.horse.hooves();
       const hp = hs[(Math.random() * hs.length) | 0];
@@ -516,8 +539,9 @@ function aimPose(r: Rider, aiming: boolean) {
   rv.pose(j);
 }
 
-/** The Fall: rider comes off as a ragdoll; horse keeps going riderless. */
-export function fellRider(r: Rider, hitPoint: THREE.Vector3, shotDir: THREE.Vector3, head: boolean) {
+/** The Fall: rider comes off as a ragdoll; horse keeps going riderless.
+ *  `viaHorse`: the shot hit the Horse — it goes down and spills the Rider forward. */
+export function fellRider(r: Rider, hitPoint: THREE.Vector3, shotDir: THREE.Vector3, head: boolean, viaHorse = false) {
   if (r.state === 'fallen' || r.state === 'gone' || !r.rider) return;
   const rv = r.rider;
   rv.frame.updateWorldMatrix(true, true);
@@ -536,9 +560,18 @@ export function fellRider(r: Rider, hitPoint: THREE.Vector3, shotDir: THREE.Vect
   // which segment was hit? nearest start/end midpoint
   let hitKey = head ? 'head' : 'torso'; let best = Infinity;
   for (const s of segs) { const d = s.start.clone().add(s.end).multiplyScalar(0.5).distanceTo(hitPoint); if (d < best) { best = d; hitKey = s.key; } }
-  const vel = r.vel.clone().multiplyScalar(0.75).add(new THREE.Vector3(0, 1.2, 0));
-  const impulse = shotDir.clone().multiplyScalar(head ? 70 : 120).add(new THREE.Vector3(0, 40, 0));
-  spawnRagdoll(segs, rv.binder, vel, impulse, hitKey, 5);
+  let vel: THREE.Vector3, impulse: THREE.Vector3;
+  if (viaHorse) {
+    // pitched over the horse's head: carries his momentum, small kick from the shot
+    vel = r.vel.clone().multiplyScalar(1.1).add(new THREE.Vector3(0, 2.2, 0));
+    impulse = shotDir.clone().multiplyScalar(25).add(new THREE.Vector3(0, 30, 0));
+    hitKey = 'torso';
+    r.downT = HORSE_DOWN_TIME; r.downDust = false;
+  } else {
+    vel = r.vel.clone().multiplyScalar(0.75).add(new THREE.Vector3(0, 1.2, 0));
+    impulse = shotDir.clone().multiplyScalar(head ? 70 : 120).add(new THREE.Vector3(0, 40, 0));
+  }
+  spawnRagdoll(segs, rv.binder, vel, impulse, hitKey, viaHorse ? 3 : 5);
   hitPuff(hitPoint);
   r.state = 'fallen';
   r.riderless = true;
@@ -565,6 +598,26 @@ export function shootRay(origin: THREE.Vector3, dir: THREE.Vector3): HitResult {
   if (ud.kind === 'rider') return { kind: 'rider', rider: ud.rider, point: h.point, head: !!ud.head };
   if (ud.kind === 'horse') return { kind: 'horse', rider: ud.rider, point: h.point };
   return { kind: 'coach', point: h.point };
+}
+
+/** Aim assist: the nearest live Rider within `maxAngle` of the shot and not
+ *  hidden behind a Stagecoach — a near miss still counts. */
+const toRider = new THREE.Vector3(), riderCtr = new THREE.Vector3();
+export function assistTarget(origin: THREE.Vector3, dir: THREE.Vector3, maxAngle: number): HitResult {
+  let best: Rider | null = null, bestAng = maxAngle, bestPt: THREE.Vector3 | null = null;
+  const coaches = blockers.map(b => b.mesh);
+  for (const r of riders) {
+    if (!r.rider || r.state === 'fallen' || r.state === 'gone') continue;
+    r.hitRider.getWorldPosition(riderCtr);
+    toRider.subVectors(riderCtr, origin);
+    const d = toRider.length(); toRider.divideScalar(d);
+    const ang = Math.acos(clamp(toRider.dot(dir), -1, 1));
+    if (ang >= bestAng) continue;
+    raycaster.set(origin, toRider); raycaster.far = d;
+    if (raycaster.intersectObjects(coaches, false).length) continue;
+    best = r; bestAng = ang; bestPt = riderCtr.clone();
+  }
+  return best ? { kind: 'rider', rider: best, point: bestPt!, head: false } : { kind: 'none' };
 }
 
 export function clearRiders() {

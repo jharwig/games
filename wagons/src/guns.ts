@@ -3,7 +3,7 @@
 // (cycle / reload / swap), recoil + sway animation, muzzle smoke.
 import * as THREE from 'three';
 import type { GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { camera, forward } from './gfx';
+import { camera, forward, scene } from './gfx';
 import { muzzleSmoke } from './particles';
 import { REVOLVER_FIRE_TIME, REVOLVER_RELOAD_TIME, REVOLVER_ROUNDS, REVOLVER_SPREAD, RIFLE_LEVER_TIME, RIFLE_SPREAD, SWAP_TIME, PALETTE } from './constants';
 import { clamp, lerp, rand } from './util';
@@ -33,6 +33,10 @@ export const gun = {
 
 const rig = new THREE.Group();   // holds both viewmodels, child of camera
 camera.add(rig);
+// muzzle flash: a point light that lives at the muzzle for a few frames
+const flash = new THREE.PointLight(0xffb870, 0, 14, 2);
+flash.visible = false;
+scene.add(flash);
 let vm: Record<GunKind, ViewModel>;
 
 const steel = new THREE.MeshStandardMaterial({ color: 0x5a5d63, roughness: 0.35, metalness: 0.9 });
@@ -178,13 +182,15 @@ export function tryFire(): FireResult {
   gun.rounds--;
   const v = vm[gun.kind];
   const mpos = v.muzzle.getWorldPosition(new THREE.Vector3());
-  muzzleSmoke(mpos, forward, gun.kind === 'rifle' ? 16 : 10);
+  muzzleSmoke(mpos, forward, gun.kind === 'rifle' ? 26 : 16);
+  flash.position.copy(mpos).addScaledVector(forward, 0.25);
+  flash.intensity = gun.kind === 'rifle' ? 60 : 40; flash.visible = true;
   if (gun.kind === 'rifle') {
-    recoil.vz += 0.9; recoil.vrx += 2.2;
+    recoil.vz += 1.5; recoil.vrx += 3.4;
     gun.state = 'cycling'; gun.timer = RIFLE_LEVER_TIME; leverPhase = 0;
     return { ok: true, spread: RIFLE_SPREAD };
   } else {
-    recoil.vz += 0.5; recoil.vrx += 2.8;
+    recoil.vz += 0.8; recoil.vrx += 3.6;
     gun.state = 'cycling'; gun.timer = REVOLVER_FIRE_TIME;
     return { ok: true, spread: REVOLVER_SPREAD };
   }
@@ -228,6 +234,8 @@ export function updateGuns(dt: number) {
       gun.state = 'ready'; gun.timer = 0;
     }
   }
+  // muzzle flash dies in ~60 ms
+  if (flash.visible) { flash.intensity *= Math.exp(-45 * dt); if (flash.intensity < 0.5) { flash.intensity = 0; flash.visible = false; } }
   // recoil spring
   const k = 120, c = 14;
   recoil.vz += (-recoil.z * k - recoil.vz * c) * dt; recoil.z += recoil.vz * dt;

@@ -172,8 +172,22 @@ resize();
 export const yaw = { value: 0 };
 export const pitch = { value: 0 };
 export function applyLook() {
-  yawObj.rotation.y = yaw.value;
-  pitchObj.rotation.x = pitch.value;
+  yawObj.rotation.y = yaw.value + kick.y;
+  pitchObj.rotation.x = pitch.value + kick.p;
+  camera.rotation.z = kick.r;
+}
+// camera kick when a gun goes off: a stiff spring on pitch/yaw/roll offsets
+const kick = { p: 0, y: 0, r: 0, vp: 0, vy: 0, vr: 0 };
+export function cameraKick(amount: number) {
+  kick.vp += amount;
+  kick.vy += (Math.random() - 0.5) * amount * 0.5;
+  kick.vr += (Math.random() - 0.5) * amount * 0.8;
+}
+export function updateKick(dt: number) {
+  const k = 300, c = 20;
+  kick.vp += (-kick.p * k - kick.vp * c) * dt; kick.p += kick.vp * dt;
+  kick.vy += (-kick.y * k - kick.vy * c) * dt; kick.y += kick.vy * dt;
+  kick.vr += (-kick.r * k - kick.vr * c) * dt; kick.r += kick.vr * dt;
 }
 /** unit forward vector of the camera in world space (XZ + Y) */
 export const forward = new THREE.Vector3();

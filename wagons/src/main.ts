@@ -1,16 +1,16 @@
 // Circle the Wagons — composition root and ALL game rules.
 import * as THREE from 'three';
-import { applyEnvironment, applyLook, camera, canvas, forward, pitch, renderer, scene, setGroundTextures, updateForward, yaw, yawAngle, yawObj } from './gfx';
+import { applyEnvironment, applyLook, camera, cameraKick, canvas, forward, pitch, renderer, scene, setGroundTextures, updateForward, updateKick, yaw, yawAngle, yawObj } from './gfx';
 import { loadHDR, loadManifest, loadModel, loadTexture, media, withProgress } from './assets';
 import { buildRing } from './ring';
 import { initPhysics, stepPhysics } from './ragdoll';
-import { activeRiderCount, clearRiders, fellRider, initRiders, riders, shootRay, spawnRider, updateRiders, type Rider } from './riders';
+import { activeRiderCount, assistTarget, clearRiders, fellRider, initRiders, riders, shootRay, spawnRider, updateRiders, type Rider } from './riders';
 import { feedSway, gun, gunEvents, gunRandomSpread, initGuns, startReload, swapGun, tryFire, updateGuns } from './guns';
 import { consume, exitLock, gyroAvailable, gyroWanted, input, requestLock, setGyro } from './input';
 import { dust, updateParticles } from './particles';
 import { audio, type LoopHandle } from './audio';
 import * as ui from './ui';
-import { BEST_KEY, BREATHER_TIME, HEARTS, KEY_TURN_SPEED, PITCH_LIMIT, State, raidParams } from './constants';
+import { AIM_ASSIST, BEST_KEY, BREATHER_TIME, HEARTS, KEY_TURN_SPEED, PITCH_LIMIT, State, raidParams } from './constants';
 import { angDiff, clamp, loadStr, saveStr, rand } from './util';
 
 // ------------------------------------------------------------ game state
@@ -67,7 +67,7 @@ function startRun() {
   hadLock = false; paused = false;
   requestLock();
   startRaid(1);
-  if (!wind) wind = audio.loop('wind', { vol: 0.35 });
+  if (!wind) wind = audio.loop('wind', { vol: 0.1 });
 }
 function startRaid(n: number) {
   raidNo = n;
@@ -107,7 +107,8 @@ function fire() {
     if (res.reason === 'dry') audio.play(gun.kind === 'revolver' ? 'reload' : 'dry', { vol: 0.5 });
     return;
   }
-  audio.play(gun.kind === 'rifle' ? 'rifle' : 'revolver', { vol: 1 });
+  audio.play(gun.kind === 'rifle' ? 'rifle' : 'revolver', { vol: 1.3 });
+  cameraKick(gun.kind === 'rifle' ? 1.1 : 0.75);
   // the look was just updated this frame; make the camera matrix current before raycasting
   applyLook(); yawObj.updateWorldMatrix(false, true); updateForward();
   camera.getWorldPosition(rayOrigin);
@@ -117,15 +118,21 @@ function fire() {
     RIGHT.crossVectors(forward, UPV).normalize();
     rayDir.addScaledVector(RIGHT, s.x).addScaledVector(UPV, s.y).normalize();
   }
-  const hit = shootRay(rayOrigin, rayDir);
-  if (hit.kind === 'rider' && hit.rider && hit.point) {
-    fellRider(hit.rider, hit.point, rayDir, !!hit.head);
+  let hit = shootRay(rayOrigin, rayDir);
+  const live = (h: typeof hit) => !!h.rider && h.rider.state !== 'fallen' && h.rider.state !== 'gone';
+  if (!((hit.kind === 'rider' || hit.kind === 'horse') && live(hit))) {
+    const a = assistTarget(rayOrigin, rayDir, AIM_ASSIST);
+    if (a.kind === 'rider') hit = a;
+  }
+  if ((hit.kind === 'rider' || hit.kind === 'horse') && live(hit) && hit.rider && hit.point) {
+    const viaHorse = hit.kind === 'horse';
+    fellRider(hit.rider, hit.point, rayDir, !!hit.head, viaHorse);
     streak++;
     score += ui.streakMult(streak);
     ui.setScore(score, streak);
     const { pan, dist } = panFor(hit.rider);
-    audio.play('thud', { vol: 0.8, pan, dist });
-    if (Math.random() < 0.25) audio.play('whinny', { vol: 0.4, pan, dist });
+    audio.play('thud', { vol: viaHorse ? 1.0 : 0.8, pan, dist });
+    if (viaHorse || Math.random() < 0.25) audio.play('whinny', { vol: viaHorse ? 0.6 : 0.4, pan, dist });
   } else {
     if (streak > 0) { streak = 0; ui.setScore(score, streak); }
     if (hit.point) dust(hit.point, 5, 1.5); // dust/splinters where the shot landed
@@ -201,6 +208,7 @@ function frame(now: number) {
     handleInput(dt);
   }
   consume();
+  updateKick(dt);
   applyLook();
   updateForward();
 

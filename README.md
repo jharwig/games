@@ -121,7 +121,7 @@ Circle the Wagons is a first-person shooting gallery on a golden-hour prairie. Y
 
 - You never move from the centre of the ring. Turning, aiming and reloading are all you have.
 - Riders circle at their own speed and radius — some the other way round, later ones hanging off the far side of the horse so they are hard to hit. The stagecoaches are their cover: a rider passing behind one is briefly hidden, so you shoot through the gaps and over the roofs.
-- Horses cannot be hurt. A shot that hits the horse is a miss.
+- Hitting the horse works too: it goes down and throws its rider, then gets up and runs off.
 - Before a rider shoots he aims: he turns in the saddle and raises his gun for about a second, with a sound and a visible cue. Drop him during his aim and the shot never comes.
 - A rider you hit falls off his horse as a physics ragdoll — every fall is different, his hat flies off, and the horse gallops away out of the ring. No blood.
 - You have five hearts. Every shot that lands on you costs one, and you cannot dodge. Clear all the riders in a raid and your hearts refill, a short breather follows, and the next raid is bigger, faster and more aggressive.

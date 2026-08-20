@@ -37,8 +37,9 @@ reverse, and later ones hang off the far side of the horse to be hard to hit.
 _Avoid_: enemy, bandit, Indian, outlaw (as the noun for the target)
 
 **Horse**:
-The mount a Rider sits. Horses cannot be harmed: a shot that hits a Horse is
-a miss. A Horse whose Rider has Fallen gallops off out of the Ring.
+The mount a Rider sits. A shot that hits a Horse brings it down — it skids
+into the dirt, spilling its Rider (a Fall), then gets back up and gallops
+off unharmed. A Horse whose Rider has Fallen gallops off out of the Ring.
 
 **Fall**:
 What happens to a Rider who is shot: he tumbles off his Horse as a physics

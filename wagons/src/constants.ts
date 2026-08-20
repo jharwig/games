@@ -4,10 +4,10 @@ export const enum State { LOADING, TITLE, PLAYING, BREATHER, OVER }
 
 // ---- world scale (metres) ----
 export const EYE_HEIGHT = 1.7;
-export const RING_RADIUS = 9;          // Stagecoach ring (~20 yards across)
-export const COACH_COUNT = 8;
-export const LANE_MIN = 14;            // Riders circle between these radii
-export const LANE_MAX = 24;
+export const RING_RADIUS = 7.5;        // Stagecoach ring — tight, with wide gaps to shoot through
+export const COACH_COUNT = 6;
+export const LANE_MIN = 11;            // Riders circle between these radii
+export const LANE_MAX = 19;
 export const SPAWN_RADIUS = 42;        // Riders appear out here and ride in
 export const GROUND_SIZE = 400;
 
@@ -26,6 +26,7 @@ export const REVOLVER_FIRE_TIME = 0.17;
 export const REVOLVER_RELOAD_TIME = 1.6;
 export const REVOLVER_SPREAD = 0.012;  // radians cone
 export const SWAP_TIME = 0.4;
+export const AIM_ASSIST = 0.016;       // radians: a near miss on a Rider still counts
 
 // ---- riders ----
 export const HORSE_SPEED = 11;         // m/s at raid 0 (gallop)
@@ -34,6 +35,7 @@ export const AIM_TIME_MIN = 0.65;
 export const AIM_GAP = 7;              // seconds between a rider's Aims at raid 1
 export const AIM_GAP_MIN = 2.8;
 export const BODY_FADE_TIME = 6;       // fallen riders fade after this
+export const HORSE_DOWN_TIME = 2.6;    // a shot Horse goes down, then gets up and runs
 export const BREATHER_TIME = 4;
 
 // ---- scoring ----

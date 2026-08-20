@@ -73,7 +73,12 @@ function ensure(): AudioContext | null {
   try { ac = new Ctor(); } catch { unavailable = true; return null; }
   master = ac.createGain();
   master.gain.value = isMuted ? 0 : 1;
-  master.connect(ac.destination);
+  // A bus compressor so gunshots can hit far above 0 dB and duck everything
+  // else for an instant instead of clipping — that duck is half the punch.
+  const comp = ac.createDynamicsCompressor();
+  comp.threshold.value = -14; comp.knee.value = 18; comp.ratio.value = 5;
+  comp.attack.value = 0.004; comp.release.value = 0.18;
+  master.connect(comp); comp.connect(ac.destination);
   // 2 s of white noise, reused by every noisy voice.
   const len = Math.floor(ac.sampleRate * 2);
   whiteBuf = ac.createBuffer(1, len, ac.sampleRate);
@@ -207,19 +212,27 @@ function click(at: number, dest: AudioNode, freq: number, gain: number, dur = 0.
 type Voice = (at: number, dest: AudioNode, rate: number) => void;
 
 const SYNTH: Record<Sfx, Voice> = {
-  // Sharp white-noise crack, then the low boom rolling off the prairie.
+  // Hard broadband crack, a chest-thump of sub, the boom rolling out, then a
+  // slapback off the coaches and the prairie echo. Loud on purpose — the bus
+  // compressor takes the peak.
   rifle: (t, d, r) => {
-    noise({ at: t, dur: 0.02, gain: 1.0, type: 'highpass', freq: 1600 * r, q: 0.7, attack: 0.0006, dest: d });
-    noise({ at: t, dur: 0.09, gain: 0.55, type: 'bandpass', freq: 2600 * r, freqTo: 700, q: 0.8, dest: d });
-    tone({ type: 'sine', freq: 120 * r, freqTo: 52, at: t, dur: 0.25, gain: 0.75, attack: 0.003, dest: d });
-    noise({ at: t + 0.02, dur: 0.35, gain: 0.22, type: 'lowpass', freq: 700, freqTo: 160, dest: d });
+    noise({ at: t, dur: 0.012, gain: 1.8, type: 'highpass', freq: 900 * r, q: 0.5, attack: 0.0004, dest: d });
+    noise({ at: t, dur: 0.055, gain: 1.2, type: 'bandpass', freq: 2300 * r, freqTo: 500, q: 0.6, attack: 0.0005, dest: d });
+    tone({ type: 'triangle', freq: 460 * r, freqTo: 90, at: t, dur: 0.07, gain: 0.7, attack: 0.001, dest: d });
+    tone({ type: 'sine', freq: 170 * r, freqTo: 40, at: t, dur: 0.34, gain: 1.5, attack: 0.002, dest: d });
+    noise({ at: t + 0.01, dur: 0.5, gain: 0.55, type: 'lowpass', freq: 1000, freqTo: 120, dest: d });
+    noise({ at: t + 0.07, dur: 0.12, gain: 0.25, type: 'bandpass', freq: 1500 * r, freqTo: 500, q: 0.8, dest: d });
+    noise({ at: t + 0.26, dur: 0.8, gain: 0.13, type: 'lowpass', freq: 520, freqTo: 110, dest: d });
   },
-  // Shorter and brighter than the Rifle, with less body behind it.
+  // Shorter and brighter than the Rifle, snappier, a little less sub.
   revolver: (t, d, r) => {
-    noise({ at: t, dur: 0.014, gain: 0.9, type: 'highpass', freq: 2200 * r, q: 0.7, attack: 0.0005, dest: d });
-    noise({ at: t, dur: 0.06, gain: 0.45, type: 'bandpass', freq: 3200 * r, freqTo: 900, q: 0.9, dest: d });
-    tone({ type: 'sine', freq: 180 * r, freqTo: 70, at: t, dur: 0.14, gain: 0.5, attack: 0.002, dest: d });
-    noise({ at: t + 0.015, dur: 0.2, gain: 0.14, type: 'lowpass', freq: 900, freqTo: 220, dest: d });
+    noise({ at: t, dur: 0.01, gain: 1.6, type: 'highpass', freq: 1300 * r, q: 0.5, attack: 0.0004, dest: d });
+    noise({ at: t, dur: 0.045, gain: 1.0, type: 'bandpass', freq: 3000 * r, freqTo: 700, q: 0.7, attack: 0.0005, dest: d });
+    tone({ type: 'triangle', freq: 600 * r, freqTo: 120, at: t, dur: 0.05, gain: 0.6, attack: 0.001, dest: d });
+    tone({ type: 'sine', freq: 200 * r, freqTo: 48, at: t, dur: 0.22, gain: 1.1, attack: 0.002, dest: d });
+    noise({ at: t + 0.01, dur: 0.3, gain: 0.4, type: 'lowpass', freq: 1200, freqTo: 180, dest: d });
+    noise({ at: t + 0.06, dur: 0.1, gain: 0.2, type: 'bandpass', freq: 1800 * r, freqTo: 600, q: 0.8, dest: d });
+    noise({ at: t + 0.2, dur: 0.5, gain: 0.09, type: 'lowpass', freq: 600, freqTo: 120, dest: d });
   },
   // Clack-clack: two clicks 90 ms apart, bandpassed around 2.5 kHz.
   lever: (t, d, r) => {

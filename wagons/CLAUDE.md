@@ -38,13 +38,15 @@ muzzle smoke ever comes near the camera.
   mountain ridges used when the HDRI is missing, `applyEnvironment(hdr)`.
 - `assets.ts` — reads `media/manifest.json`; `loadModel` (GLTF + meshopt),
   `loadTexture`, `loadHDR` all return `null` for anything missing.
-- `ring.ts` — the eight Stagecoaches (procedural Concord coaches or fitted
+- `ring.ts` — the six Stagecoaches (procedural Concord coaches or fitted
   GLBs), camp dressing, and `blockers` (invisible boxes used both for shot
   raycasts and as Rapier colliders).
 - `riders.ts` — `Rider` (angle/radius/dir/speed, `arriving → riding ⇄ aiming
   → fallen → gone`), circling + lane weave, hoof dust, the Aim telegraph
   (`aimPose`) and shot, hitboxes (`userData.kind` = rider/horse/coach),
-  `shootRay`, and `fellRider` (the Fall). Horses and riders each come in
+  `shootRay`, `assistTarget` (small aim-assist cone), and `fellRider` (the
+  Fall — also used when the Horse is hit: `viaHorse` drops the horse for
+  `HORSE_DOWN_TIME`, then it gets up and runs). Horses and riders each come in
   two flavours with one interface: procedural (`proceduralHorse`,
   `proceduralRider`) or skinned GLB (`skinnedHorse` with an AnimationMixer
   playing the `gallop` clip, `skinnedRider` driving recognised bones).
