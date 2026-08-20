@@ -91,5 +91,6 @@ Pirates of the Swingset is a third-person 3D game set on a ring of four small is
 - **Left / Right arrows** — jump off the swing and run; at a treetop, ride the zip line to that side
 - **Up / Down arrows** — walk toward or away from the ship, and climb trees
 - **Enter or F / THROW button** — throw or use the held tool
+- **On touch screens** — a virtual joystick in the lower left replaces the arrows: touch anywhere in that corner and tilt. Bailing off a swing or grabbing a zip line takes a firm sideways tilt.
 - **M** — mute / unmute the sea shanty
 - Pick the boy or the girl on the title screen; you can switch after every sunken ship.

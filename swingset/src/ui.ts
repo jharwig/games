@@ -185,14 +185,31 @@ const CSS = `
 /* --- touch controls ----------------------------------------------------- */
 #ui .pots-touch { position: absolute; inset: 0; display: none; }
 #ui .pots-touch.on { display: block; }
-#ui .pots-pad {
+#ui .pots-zone {
+  position: absolute; left: 0; bottom: 0;
+  width: 50%; height: 60%;
+  touch-action: none;
+}
+#ui .pots-stick {
   position: absolute;
   left: max(10px, env(safe-area-inset-left));
   bottom: max(12px, env(safe-area-inset-bottom));
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: 120px; height: 120px; border-radius: 50%;
+  background: radial-gradient(circle at 50% 42%, rgba(48,29,16,.5), rgba(22,13,7,.62));
+  border: 2px solid rgba(216,177,112,.45);
+  box-shadow: inset 0 2px 8px rgba(0,0,0,.5);
+  opacity: .35; transition: opacity .18s ease;
+  pointer-events: none;
 }
-#ui .pots-pad .lr { display: flex; gap: 10px; }
-#ui .pots-pad .ud { display: flex; gap: 10px; }
+#ui .pots-stick.active { opacity: .92; transition: none; }
+#ui .pots-nub {
+  position: absolute; left: 50%; top: 50%;
+  width: 54px; height: 54px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, rgba(112,74,41,.95), rgba(48,29,16,.95));
+  border: 2px solid rgba(216,177,112,.6);
+  box-shadow: 0 3px 0 rgba(0,0,0,.45), inset 0 1px 0 rgba(255,231,181,.2);
+  transform: translate(-50%, -50%);
+}
 #ui .pots-act {
   position: absolute;
   right: max(10px, env(safe-area-inset-right));
@@ -211,13 +228,12 @@ const CSS = `
   width: 58px; height: 58px; font-size: 22px;
 }
 #ui .pots-btn.wide { border-radius: 40px; }
-#ui .pots-btn.swing { width: 96px; height: 96px; font-size: 15px;
+#ui .pots-btn.swing { width: 70px; height: 70px; font-size: 13px;
   background: radial-gradient(circle at 35% 30%, rgba(58,120,148,.95), rgba(16,52,72,.92));
   border-color: rgba(150,215,240,.65); }
-#ui .pots-btn.throw { width: 70px; height: 70px; font-size: 13px;
+#ui .pots-btn.throw { width: 96px; height: 96px; font-size: 15px;
   background: radial-gradient(circle at 35% 30%, rgba(150,86,40,.95), rgba(78,38,14,.92));
   border-color: rgba(240,180,110,.6); }
-#ui .pots-btn.down { transform: none; }
 #ui .pots-btn.pressed { filter: brightness(1.45); box-shadow: 0 1px 0 rgba(0,0,0,.45) inset; }
 
 #ui .pots-mute {
@@ -393,7 +409,7 @@ export function createUi(ctx: GameCtx): UiApi {
     const hint = document.createElement('div');
     hint.className = 'pots-hint';
     hint.textContent =
-      'Space / tap = swing · arrows = run & climb · ◀ ▶ at a treetop = zip line · Enter = throw · M = mute';
+      'Space / SWING = swing · arrows or stick = run & climb · ◀ ▶ at a treetop = zip line · Enter / THROW = throw · M = mute';
     titleScreen.append(h, credit, bestLine, prompt, titleCards.el, hint);
   }
 
@@ -589,29 +605,110 @@ export function createUi(ctx: GameCtx): UiApi {
   }
 
   const input = ctx.input;
-  const pad = document.createElement('div');
-  pad.className = 'pots-pad';
-  const ud = document.createElement('div');
-  ud.className = 'ud';
-  ud.append(
-    holdButton('▲', 'up', () => (input.up = true), () => (input.up = false)),
-    holdButton('▼', 'down', () => (input.down = true), () => (input.down = false)),
-  );
-  const lr = document.createElement('div');
-  lr.className = 'lr';
-  lr.append(
-    holdButton('◀', 'left', () => (input.left = true), () => (input.left = false)),
-    holdButton('▶', 'right', () => (input.right = true), () => (input.right = false)),
-  );
-  pad.append(ud, lr);
+
+  // Floating virtual joystick in the lower-left zone. Digital 8-way: the
+  // stick vector maps onto the same left/right/up/down booleans the keyboard
+  // sets, so gameplay feel is unchanged. A direction is active when its
+  // normalized component is >= COMP_ON, which gives cardinals 60° sectors and
+  // diagonals 30°. Bail (swinging) and zip (Lookout) fire on a *fresh*
+  // left/right press downstream, so entering a horizontal sector in those
+  // states takes a deliberate tilt (ENTER_COMMIT).
+  const STICK_BASE = 120; // ring diameter, matches .pots-stick CSS
+  const STICK_R = 44; // px of nub travel
+  const ENTER = 0.35; // magnitude (fraction of STICK_R) to press a direction
+  const ENTER_COMMIT = 0.65; // ...for left/right while swinging / at Lookout
+  const RELEASE = 0.25; // magnitude below which a held direction lets go
+  const COMP_ON = 0.5; // normalized component to enter a sector
+  const COMP_OFF = 0.4; // ...and to stay in it (hysteresis)
+
+  const zone = document.createElement('div');
+  zone.className = 'pots-zone clickable';
+  const stick = document.createElement('div');
+  stick.className = 'pots-stick';
+  const nub = document.createElement('div');
+  nub.className = 'pots-nub';
+  stick.appendChild(nub);
+
+  let stickPointer: number | null = null;
+  let originX = 0;
+  let originY = 0;
+
+  function releaseStick(): void {
+    if (stickPointer !== null && zone.hasPointerCapture(stickPointer)) {
+      zone.releasePointerCapture(stickPointer);
+    }
+    stickPointer = null;
+    stick.classList.remove('active');
+    stick.style.left = '';
+    stick.style.top = '';
+    nub.style.transform = '';
+    input.left = input.right = input.up = input.down = false;
+  }
+
+  function moveStick(e: PointerEvent): void {
+    const dx = e.clientX - originX;
+    const dy = e.clientY - originY;
+    const len = Math.hypot(dx, dy);
+    const nx = len > 0 ? dx / len : 0;
+    const ny = len > 0 ? dy / len : 0;
+    const reach = Math.min(len, STICK_R);
+    nub.style.transform =
+      `translate(calc(-50% + ${nx * reach}px), calc(-50% + ${ny * reach}px))`;
+
+    const m = reach / STICK_R;
+    const p = ctx.player;
+    const commit = p && (p.mode === 'swinging' || p.atLookout);
+    const comps = { left: -nx, right: nx, up: -ny, down: ny };
+    for (const dir of ['left', 'right', 'up', 'down'] as const) {
+      const c = comps[dir];
+      if (input[dir]) {
+        if (m < RELEASE || c < COMP_OFF) input[dir] = false;
+      } else {
+        const horizontal = dir === 'left' || dir === 'right';
+        const enter = commit && horizontal ? ENTER_COMMIT : ENTER;
+        if (m >= enter && c >= COMP_ON) input[dir] = true;
+      }
+    }
+  }
+
+  zone.addEventListener('pointerdown', (e) => {
+    if (stickPointer !== null) return;
+    e.preventDefault();
+    stickPointer = e.pointerId;
+    zone.setPointerCapture(e.pointerId);
+    // Keep the ring fully on-screen; the clamped centre is the input origin
+    // too, so the visual and the vector always agree.
+    const half = STICK_BASE / 2;
+    originX = Math.min(Math.max(e.clientX, half), window.innerWidth - half);
+    originY = Math.min(Math.max(e.clientY, half), window.innerHeight - half);
+    stick.classList.add('active');
+    stick.style.left = `${originX - half}px`;
+    stick.style.top = `${originY - half}px`;
+    moveStick(e);
+  });
+  zone.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== stickPointer) return;
+    e.preventDefault();
+    moveStick(e);
+  });
+  const endStick = (e: PointerEvent): void => {
+    if (e.pointerId !== stickPointer) return;
+    e.preventDefault();
+    releaseStick();
+  };
+  zone.addEventListener('pointerup', endStick);
+  zone.addEventListener('pointercancel', endStick);
+  releaseHolds.push(releaseStick);
+  // Directions are also force-cleared on blur (input.ts): drop the stick too.
+  window.addEventListener('blur', releaseStick);
 
   const act = document.createElement('div');
   act.className = 'pots-act';
   act.append(
-    holdButton('THROW', 'throw', () => (input.throwPressed = true), () => {}),
     holdButton('SWING', 'swing', () => (input.pumpPressed = true), () => {}),
+    holdButton('THROW', 'throw', () => (input.throwPressed = true), () => {}),
   );
-  touch.append(pad, act);
+  touch.append(zone, stick, act);
 
   if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches) {
     touch.classList.add('on');
