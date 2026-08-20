@@ -4,11 +4,12 @@
 // =============================================================================
 import * as THREE from "three";
 import {
-  CLIMB_SPEED, GRAVITY, HAND_H, PALETTE, RAIL_SPEED, RUN_SPEED, TOWER_RISE, pickColor
+  CLIMB_SPEED, GRAVITY, HAND_H, PALETTE, RAIL_SPEED, RUN_SPEED, TOWER_RISE, WALL_SPEED, WALL_X, WARP_LIP,
+  pickColor
 } from "./constants";
 import { GEO, box, camera, pathWire, scene, shade, tube } from "./gfx";
 import { isTower, pathPos, placeOnPath, tmpV } from "./path";
-import { type Grab, type PendGrab, type ZipGrab, player } from "./player";
+import { type Grab, type PendGrab, type WarpGrab, type ZipGrab, player } from "./player";
 import { clamp, damp, rand } from "./util";
 
 export interface Platform {
@@ -293,6 +294,136 @@ function buildZip(c: Course, z: number, y: number, d: number): Cursor {
   return { z: lz + len, y: landY };
 }
 
+// wall ride: a plank wall beside the path over a gap. Jump at it holding
+// forward and you stick and run along it; jump again to leap off the end
+function buildWall(c: Course, z: number, y: number, d: number): Cursor {
+  const gap = 1.5 + d * 0.5;
+  const len = 6 + d * 5 + rand(0, 1.5);
+  const z0 = z + gap, z1 = z0 + len;
+  // the straight course alternates sides; on the tower the wall is always on
+  // the outside of the coil (-x is away from the tower)
+  const side = isTower() ? -1 : (Math.random() < 0.5 ? -1 : 1);
+  const rise = c.rise;
+  const yb = y - 1.6, yt = y + 3.2;      // the band of foot heights that sticks
+  const hex = pickColor();
+  const frame = shade(hex, 0.5);
+  const tilt = Math.atan2(rise, len);    // the tower's wall climbs with the coil
+  // short plank panels so only the piece next to the lens fades, never the
+  // stretch the ninja is running on
+  const n = Math.max(1, Math.ceil(len / 1.9));
+  const seg = len / n;
+  // the wall stands out at the edge of the path; the ninja shifts over to it
+  const wx = side * WALL_X;
+  for (let i = 0; i < n; i++) {
+    const zc = z0 + seg * (i + 0.5);
+    const yc = rise * (i + 0.5) / n;
+    box(c.group, wx, (yb + yt) / 2 + yc, zc, 0.3, yt - yb, seg + 0.04, hex).rotateX(-tilt);
+    // three dark plank lines on the face the ninja runs on
+    for (let s = 1; s <= 3; s++) {
+      box(c.group, wx - side * 0.17, yb + 1.2 * s + yc, zc, 0.06, 0.1, seg + 0.04, frame).rotateX(-tilt);
+    }
+  }
+  // posts at each end
+  tube(c.group, wx, (yb + yt) / 2, z0, 0.16, yt - yb + 0.8, frame);
+  tube(c.group, wx, (yb + yt) / 2 + rise, z1, 0.16, yt - yb + 0.8, frame);
+  c.grabs.push({ kind: "wall", z0: z0, z1: z1, y0: yb, y1: yt, rise: rise, side: side });
+
+  // the landing sits a little low so an easy wall can be run straight off;
+  // the gap after it grows with d until only a jump-off makes it
+  const lz = z1 + 0.8 + d * 1.8;
+  const ly = y - 0.7 + rise;
+  const landLen = 7 - d * 2.4 + rand(0, 2);
+  addPlatform(c, lz, lz + landLen, ly, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  c.est += 1.2 + len / WALL_SPEED + landLen / RUN_SPEED;
+  return { z: lz + landLen, y: ly };
+}
+
+// the warped wall: every level's finale. A flat run-up, then a quarter-circle
+// ramp you run up, topped by a short vertical lip; jump near the top of the
+// curve to grab the ledge and pull up onto the summit. Returns the far end
+// of the summit, where the podium goes.
+function buildWarp(c: Course, z: number, y: number): Cursor {
+  const d = c.d;
+  y += c.rise;
+  const runZ0 = z + 2.0 + d * 1.4;
+  const runLen = 10;
+  const z0 = runZ0 + runLen;             // the base of the curve
+  const r = 4.5 + d * 2.0;               // height (and depth) of the curve
+  const z1 = z0 + r;
+  const top = y + r;                     // the top of the curve; the ledge is WARP_LIP higher
+  const ledge = top + WARP_LIP;
+  // the run-up carries on a touch under the base so the feet are still on
+  // the ground when they reach it
+  addPlatform(c, runZ0, z0 + 0.4, y, 4.0, pickColor());
+
+  const hex = 0xff4d4d;                  // the classic red
+  const body = shade(hex, 0.42);
+  const L = r * Math.PI / 2;
+  // the curved skin: short slabs, each tilted to the arc's tangent and pushed
+  // half their thickness out from the arc so the surface is the arc itself
+  const n = Math.max(10, Math.round(L / 0.5));
+  const seg = L / n;
+  const h = 0.5;
+  for (let i = 0; i < n; i++) {
+    const a = (i + 0.5) / n * Math.PI / 2;
+    const zc = z0 + r * Math.sin(a) + (h / 2) * Math.sin(a);
+    const yc = y + r * (1 - Math.cos(a)) - (h / 2) * Math.cos(a);
+    box(c.group, 0, yc, zc, 4.0, h, seg + 0.06, hex).rotateX(-a);
+    // pale edge rails down both sides
+    box(c.group, -1.92, yc + 0.25, zc, 0.18, 0.08, seg + 0.06, 0xfff2f2).rotateX(-a);
+    box(c.group,  1.92, yc + 0.25, zc, 0.18, 0.08, seg + 0.06, 0xfff2f2).rotateX(-a);
+  }
+  // the body under the skin: stepped dark columns up to the curve. Each stops
+  // at the surface height of its *rear* edge, where the curve is lowest, so
+  // no step pokes up through the skin where the wall steepens
+  const m = 16;
+  const dz = r / m;
+  const bottom = y - 1.4;
+  const arc: WarpGrab = { kind: "warp", z0: z0, y0: y, r: r, lip: WARP_LIP, p: 0, u: 0 };
+  for (let j = 0; j < m; j++) {
+    const zc = z0 + (j + 0.5) * dz;
+    const ys = warpSurfaceY(arc, zc - dz / 2) - 0.2;
+    const ch = ys - bottom;
+    if (ch > 0.15) box(c.group, 0, bottom + ch / 2, zc, 3.6, ch, dz + 0.02, body);
+  }
+  // the lip: a vertical face from the top of the curve up to the ledge, with
+  // the same pale rails, and a dark column filling in under the summit's edge
+  box(c.group, 0, top + WARP_LIP / 2, z1 + h / 2, 4.0, WARP_LIP + 0.04, h, hex);
+  box(c.group, -1.92, top + WARP_LIP / 2, z1 - 0.03, 0.18, WARP_LIP - 0.1, 0.08, 0xfff2f2);
+  box(c.group,  1.92, top + WARP_LIP / 2, z1 - 0.03, 0.18, WARP_LIP - 0.1, 0.08, 0xfff2f2);
+  box(c.group, 0, (bottom + ledge - 0.5) / 2, z1 + 0.7, 3.6, ledge - 0.5 - bottom, 1.2, body);
+  c.grabs.push(arc);
+
+  // the summit, starting right at the ledge (flush with the lip's face, so
+  // nothing overhangs the hands and head during the hang)
+  const sumLen = 5.5;
+  addPlatform(c, z1, z1 + sumLen, ledge, 4.0, pickColor());
+  c.est += 1.2 + (runLen + 0.4) / RUN_SPEED + 2.8 + 1.4 + sumLen / RUN_SPEED;   // 1.4: the leap, catch and pull-up
+  return { z: z1 + sumLen, y: ledge };
+}
+
+// ---- warped wall geometry. The arc is a quarter circle centred on
+// (z0, y0 + r): a = p * pi/2 runs from the flat base to the vertical top ----
+export function warpPos(g: WarpGrab, p: number, out: { z: number; y: number }): void {
+  const a = p * Math.PI / 2;
+  out.z = g.z0 + g.r * Math.sin(a);
+  out.y = g.y0 + g.r * (1 - Math.cos(a));
+}
+// height of the surface at distance z along the base
+export function warpSurfaceY(g: WarpGrab, z: number): number {
+  const dz = clamp(z - g.z0, 0, g.r);
+  return g.y0 + g.r - Math.sqrt(Math.max(0, g.r * g.r - dz * dz));
+}
+// how far along the base the surface is at height y
+export function warpSurfaceZ(g: WarpGrab, y: number): number {
+  const dy = clamp(g.y0 + g.r - y, 0, g.r);
+  return g.z0 + Math.sqrt(Math.max(0, g.r * g.r - dy * dy));
+}
+// arc angle of the surface point at height y
+export function warpAngleAtY(g: WarpGrab, y: number): number {
+  return Math.acos(clamp((g.y0 + g.r - y) / g.r, -1, 1));
+}
+
 // puts the trolley (and optionally the player) at the wire position for g.t
 export function zipSync(g: ZipGrab, withPlayer: boolean): void {
   const cz = g.zA + (g.zB - g.zA) * g.t;
@@ -348,8 +479,15 @@ function buildPodium(c: Course, z: number, y: number): Cursor {
 }
 
 const BUILDERS = { gap: buildGap, rail: buildRail, swing: buildSwing, lache: buildLache, climb: buildClimb,
-                   bounce: buildBounce, zip: buildZip } satisfies Record<string, Builder>;
+                   bounce: buildBounce, zip: buildZip, wall: buildWall } satisfies Record<string, Builder>;
 type ObstacleKind = keyof typeof BUILDERS;
+
+// testing: ?test=warp builds a course that is just the run-up and the warped
+// wall; ?test=<obstacle> (gap, rail, swing, lache, climb, bounce, zip, wall)
+// builds one of that rig and then the finale
+const testParam = /[?&]test=(\w+)/.exec(location.search);
+export const testObstacle: ObstacleKind | "warp" | null =
+  testParam && (testParam[1] === "warp" || testParam[1] in BUILDERS) ? testParam[1] as ObstacleKind | "warp" : null;
 
 export function generateCourse(index: number, startZ: number, startY: number): Course {
   const d = clamp((index - 1) / 9, 0, 1);
@@ -371,27 +509,32 @@ export function generateCourse(index: number, startZ: number, startY: number): C
 
   // which obstacles are unlocked at this level
   const bag: ObstacleKind[] = ["gap", "gap", "gap", "rail"];
-  if (index >= 2) bag.push("swing", "gap", "bounce");
+  if (index >= 2) bag.push("swing", "gap", "bounce", "wall");
   if (index >= 3) bag.push("lache", "climb", "swing");
   if (index >= 4) bag.push("zip", "bounce");
-  if (index >= 5) bag.push("lache", "swing", "rail", "zip");
+  if (index >= 5) bag.push("lache", "swing", "rail", "zip", "wall");
 
-  const n = Math.min(12, 5 + Math.floor((index - 1) * 0.8));
-  let last: ObstacleKind | "" = "";
-  for (let i = 0; i < n; i++) {
-    let t = bag[(Math.random() * bag.length) | 0];
-    if (t === last && t !== "gap") t = "gap";   // avoid the same rig twice in a row
-    last = t;
-    const r = BUILDERS[t](c, z, y, d);
-    z = r.z; y = r.y;
+  if (testObstacle) {
+    // test mode: straight to the rig under test (or to the finale itself)
+    if (testObstacle !== "warp") {
+      const r = BUILDERS[testObstacle](c, z, y, d);
+      z = r.z; y = r.y;
+    }
+  } else {
+    const n = Math.min(12, 5 + Math.floor((index - 1) * 0.8));
+    let last: ObstacleKind | "" = "";
+    for (let i = 0; i < n; i++) {
+      let t = bag[(Math.random() * bag.length) | 0];
+      if (t === last && t !== "gap") t = "gap";   // avoid the same rig twice in a row
+      last = t;
+      const r = BUILDERS[t](c, z, y, d);
+      z = r.z; y = r.y;
+    }
   }
 
-  // run up to the podium (one more landing, so it climbs too)
-  y += c.rise;
-  addPlatform(c, z + 2.0 + d * 1.4, z + 2.0 + d * 1.4 + 7, y, 4.0, pickColor());
-  c.est += 1.2 + 7 / RUN_SPEED;
-  z = z + 2.0 + d * 1.4 + 7;
-  const end = buildPodium(c, z, y);
+  // the finale: run up the warped wall, and the podium waits on the summit
+  const w = buildWarp(c, z, y);
+  const end = buildPodium(c, w.z, w.y);
 
   finishBunting(c);
   collectFadeMeshes(c);

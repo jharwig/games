@@ -31,10 +31,17 @@ same distance around a helix. Everything that builds scenery goes through
   `userData.path` take course coordinates and long parts are split to hug
   the arc).
 - `course.ts` — course generation (platforms, gap/rail/swing/lache/climb/
-  bounce/zip builders, podium, bunting), the world lists (`platforms`,
-  `grabs`, `blockers`), the near-camera fade (`updateNearFade` — the repo's
-  reference implementation), disposal, and rig animation (ropes, pads,
-  star).
+  bounce/zip/wall builders, the warped-wall finale every level ends with,
+  podium, bunting), the world lists (`platforms`, `grabs`, `blockers`), the
+  near-camera fade (`updateNearFade` — the repo's reference implementation),
+  disposal, and rig animation (ropes, pads, star). Wall rides and the warped
+  wall are `Grab` kinds driven by z/y only (no lateral physics); the wall
+  ride's wall is x-offset scenery, the warped wall a quarter-circle arc
+  (`warpPos` / `warpSurfaceY` / `warpSurfaceZ`) topped by a vertical lip
+  (`WARP_LIP`) up to the ledge. The jump from the top of the arc is a
+  scripted `ledge` grab (`startLedge` / `updateLedge` in `main.ts`): leap
+  up the lip, hands catch the edge (body hanging below it), pull-up onto
+  the summit.
 - `player.ts` — the `player` state object, `Grab` types, air tricks.
 - `ninja.ts` — the character model, outfits (+ paper-doll picker buttons),
   pose system (run / air / hang / rail / climb / celebrate / idle), ponytail,
@@ -51,3 +58,14 @@ same distance around a helix. Everything that builds scenery goes through
 `localStorage` keys: `ninja.mode`, `ninja.best`, `ninja.best.tower`,
 `ninja.outfit`, `ninja.muted`. URL flags: `?mode=tower`, `?auto` (self-play
 demo).
+
+## Testing flags
+
+- `?test=warp` skips the title and builds a course that is just the run-up
+  and the warped wall; `?test=<gap|rail|swing|lache|climb|bounce|zip|wall>`
+  builds one of that rig then the finale.
+- `?level=N` starts the run at level N (bigger walls, harder rigs).
+- `?slow=0.2` runs the clock at a fifth speed, to watch an animation.
+- In test mode `window.__ninja` exposes `{ player, pressJump, autoForward,
+  setSlow }` so a headless harness (Playwright) can drive the run and read
+  the state while grabbing frames.

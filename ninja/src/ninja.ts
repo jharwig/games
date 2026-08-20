@@ -4,7 +4,7 @@
 // =============================================================================
 import * as THREE from "three";
 import { sfxStep } from "./audio";
-import { FLIP_SPEED, RUN_SPEED } from "./constants";
+import { FLIP_SPEED, RUN_SPEED, WALL_FOOT } from "./constants";
 import type { Platform } from "./course";
 import { box, mat, scene } from "./gfx";
 import { input } from "./input";
@@ -269,12 +269,18 @@ function setLean(target: number, dt: number): void {
   ninjaBody.rotation.x = damp(ninjaBody.rotation.x, target, 10, dt);
 }
 
+// sideways roll of the torso (a wall ride leans the body away from the wall)
+function setRoll(target: number, dt: number): void {
+  ninjaBody.rotation.z = damp(ninjaBody.rotation.z, target, 10, dt);
+}
+
 // every pose that is not a trick eases the spin and the spread back to normal
 function settleTrick(dt: number): void {
   player.twist = damp(player.twist, roundTo2Pi(player.twist), 16, dt);
   player.armSpread = damp(player.armSpread, 0, 16, dt);
   player.legSpread = damp(player.legSpread, 0, 16, dt);
   ninjaFlip.rotation.y = player.twist;
+  setRoll(0, dt);
 }
 
 export function poseRun(dt: number): void {
@@ -340,6 +346,74 @@ export function poseAir(dt: number): void {
   setLegs(lerp(PREP.legs[0], d.legs[0], k), lerp(PREP.legs[1], d.legs[1], k));
   setHead(lerp(PREP.head, d.head, k));
   setLean(0, dt);
+  setRoll(0, dt);
+}
+
+// running on a wall: the run stride with the torso pitched forward by `lean`
+// and rolled sideways by `roll`. Used for the wall ride (rolled away from
+// the wall) and the warped wall (leaning into the curve). A negative speed
+// is the slide back down the warped wall: arms up, legs scrabbling
+export function poseWallRun(dt: number, lean: number, roll: number, speed: number, stride: number): void {
+  player.flip = damp(player.flip, 0, 16, dt);
+  ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
+  const s = Math.abs(speed);
+  player.runPhase += dt * (3.0 + s * 1.5);
+  const sw = Math.sin(player.runPhase) * 0.95 * stride * clamp(s / RUN_SPEED, 0.3, 1.2);
+  if (speed < -0.5) {
+    setLegs(0.5 + sw * 0.4, 0.2 - sw * 0.4);
+    setArms(-2.1 + sw * 0.2, -2.1 - sw * 0.2);
+    setHead(-0.3);
+    setLean(lean * 0.5, dt);
+  } else {
+    setLegs(sw, -sw);
+    setArms(-0.5 - sw * 0.85, -0.5 + sw * 0.85);
+    setHead(-0.12);
+    setLean(lean, dt);
+  }
+  setRoll(roll, dt);
+  ninjaBody.position.y = -1.0 + Math.abs(Math.sin(player.runPhase)) * 0.05;
+  ninjaBody.scale.set(1, 1, 1);
+  // footsteps against the wall
+  player.stepT -= dt * (3.0 + s * 1.5);
+  if (speed > 2 && player.stepT <= 0) {
+    player.stepT = Math.PI;
+    sfxStep();
+    puff(player.visX, player.y + 0.02, player.z - 0.2, 2, 0.18, 0.9);
+  }
+}
+
+// the warped wall's ledge. (dz, dy) is the edge relative to the feet; the arms
+// always aim at it, so they reach up during the leap (m < 0), hang straight
+// from the grip (m = 0) and fold down as the body presses up over the edge
+// (m runs 0..1 through the pull-up)
+export function poseLedge(dt: number, dz: number, dy: number, m: number): void {
+  player.flip = damp(player.flip, 0, 16, dt);
+  ninjaFlip.rotation.x = player.flip;
+  settleTrick(dt);
+  // the shoulders sit 1.38 above the feet; a limb at rotation.x = a points
+  // along (-cos a, -sin a) in (y, z), so this aims the hands at the edge
+  const sy = dy - 1.38, sz = dz;
+  const arm = Math.atan2(-sz, -sy);
+  setArms(arm, arm);
+  if (m < 0) {
+    // the leap: one knee drives up, eyes on the edge
+    setLegs(-0.7, 0.15);
+    setHead(-0.4);
+    setLean(0.12, dt);
+  } else {
+    // the hang dangles a little, then the pull-up: a knee kicks up and over
+    // the edge while the torso folds forward over the hands, and the legs
+    // straighten under her as she stands up on the summit
+    const sway = Math.sin(performance.now() * 0.004) * 0.08;
+    const kick = Math.sin(Math.PI * clamp((m - 0.15) / 0.7, 0, 1));
+    const stand = smoothstep(clamp((m - 0.7) / 0.3, 0, 1));
+    setLegs(lerp(lerp(0.2 + sway, -1.3, kick), 0.1, stand), lerp(lerp(-0.05 - sway, -0.45, kick), -0.1, stand));
+    setHead(lerp(-0.35, 0, m));
+    setLean(0.05 + 0.35 * Math.sin(Math.PI * m), dt);
+  }
+  ninjaBody.position.y = -1.0;
+  ninjaBody.scale.set(1, 1, 1);
 }
 
 export function poseHang(dt: number, tilt: number): void {
@@ -448,7 +522,10 @@ export function syncNinja(dt: number): void {
   // the grab offset eases out over roughly a sixth of a second
   player.visOffZ = damp(player.visOffZ, 0, 13, dt);
   player.visOffY = damp(player.visOffY, 0, 13, dt);
+  // on a wall ride she hops over to the edge of the path so her feet touch the wall
+  const wallX = (player.hang && player.hang.kind === "wall") ? player.hang.side * WALL_FOOT : 0;
+  player.visX = damp(player.visX, wallX, 10, dt);
   // placed on the course and turned to face along it; flips and spins are
   // children, so they stay relative to the heading
-  placeOnPath(ninja, player.z + player.visOffZ, 0, player.y + player.visOffY);
+  placeOnPath(ninja, player.z + player.visOffZ, player.visX, player.y + player.visOffY);
 }

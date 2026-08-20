@@ -15,7 +15,24 @@ export interface ZipGrab {
   kind: "zip"; zA: number; yA: number; zB: number; yB: number;
   hang: number; wireLen: number; t: number; speed: number; node: THREE.Group;
 }
-export type Grab = PendGrab | RailGrab | ClimbGrab | ZipGrab;
+// wall ride: a wall beside the path you stick to in the air and run along.
+// y0..y1 is the band of foot heights that sticks (at z0; it rises by `rise`
+// over the length), side is which side of the path the wall is on
+export interface WallGrab { kind: "wall"; z0: number; z1: number; y0: number; y1: number; rise: number; side: number }
+// warped wall: a quarter-circle ramp of radius r from the base (z0, y0) up to
+// the top of the curve at (z0 + r, y0 + r), then a vertical lip of height
+// `lip` up to the ledge. p is how far up the arc (0..1), u the speed along it
+// (negative = sliding back down)
+export interface WarpGrab { kind: "warp"; z0: number; y0: number; r: number; lip: number; p: number; u: number }
+// the warped wall's ledge at (z, y): the jump from high on the arc is a leap
+// from (zL, yL) that peaks at (zH, yH) after leapT seconds, where the hands
+// catch the edge; a beat on the grip, then she pulls up over it. t runs
+// through the whole thing, vy is the leap's take off speed
+export interface LedgeGrab {
+  kind: "ledge"; z: number; y: number; t: number;
+  zL: number; yL: number; zH: number; yH: number; leapT: number; vy: number;
+}
+export type Grab = PendGrab | RailGrab | ClimbGrab | ZipGrab | WallGrab | WarpGrab | LedgeGrab;
 
 // ---------------- tricks ----------------
 // flips  = whole turns around X (negative goes backwards)
@@ -89,6 +106,7 @@ export function endTrick(): void { player.trick = null; }
 export const player = {
   z: 0, y: 0, vz: 0, vy: 0,
   visOffZ: 0, visOffY: 0,   // visual-only offset that eases out a grab snap
+  visX: 0,                  // visual-only sideways offset (feet against a wall ride)
   onGround: false, coyote: 0, jumpBuf: 0,
   jumpCut: false, jumpHold: 0,   // variable jump height: armed while the rise can still be cut
   flip: 0, runPhase: 0, stepT: 0, moveAnim: 0,

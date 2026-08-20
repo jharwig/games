@@ -34,7 +34,7 @@ The scene is drawn on a 160×288 pixel canvas: a starry sky with a cratered moon
 
 **Play:** https://jharwig.github.io/games/ninja/
 
-Ninja Adventure is a third-person 3D obstacle-course game in a bright cartoon look. You run a ninja-warrior course full of very colorful obstacles: jumps with flips, rope climbs, rope swings, monkey bars, and laché bars. Each course is randomly generated, and each level is more difficult than the one before.
+Ninja Adventure is a third-person 3D obstacle-course game in a bright cartoon look. You run a ninja-warrior course full of very colorful obstacles: jumps with flips, rope climbs, rope swings, monkey bars, laché bars, trampolines, ziplines, and wall rides (jump at the wall holding forward, run along it, and jump off the end). Every level ends with the warped wall: run up the curve and jump near the top to grab the ledge and pull yourself up onto the podium's summit — slide back and try again if you're early. Each course is randomly generated, and each level is more difficult than the one before.
 
 - Reach the podium at the end of each level to get a gold, silver, or bronze medal. The faster you are, the better the medal.
 - If you fall, you go back to the last podium and try again.

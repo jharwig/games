@@ -4,36 +4,42 @@
 // =============================================================================
 import {
   applyMute, audio, initAudio, pumpMusic, sfxBounce, sfxFall, sfxGrab, sfxJump, sfxLand,
-  sfxMedal, sfxWhoosh, startMusic
+  sfxMedal, sfxStep, sfxWhoosh, startMusic
 } from "./audio";
 import { camImpulse, snapCamera, updateCamera } from "./camera";
 import {
   AIR_ACCEL, AIR_DRAG, CLIMB_SPEED, COYOTE, EDGE_GRACE, FALL_LIMIT, FLIP_SPEED, GRAVITY,
-  HAND_H, JUMP_CUT, JUMP_HOLD_MIN, JUMP_V, MAX_FALL, PEND_DAMP, PUMP, RAIL_SPEED,
-  RELEASE_LOCK, RUN_SPEED, State, ZIP_ACCEL, ZIP_MAX, type Medal
+  HAND_H, JUMP_CUT, JUMP_HOLD_MIN, JUMP_V, LEDGE_HOLD, LEDGE_PULL, LEDGE_STEP, MAX_FALL,
+  PEND_DAMP, PUMP, RAIL_SPEED, RELEASE_LOCK, RUN_SPEED, State, WALL_SAG, WALL_SPEED,
+  WARP_BOOST, WARP_PEAK, WARP_WINDOW, ZIP_ACCEL, ZIP_MAX, type Medal
 } from "./constants";
 import {
   type Course, type Platform, animateRopes, blockers, clearCourses, courses, disposeCourse,
   generateCourse, grabs, handleY, handleZ, platforms, rebuildWorldLists, updateNearFade,
-  updatePads, updateStars, zipSync
+  testObstacle, updatePads, updateStars, warpAngleAtY, warpPos, warpSurfaceZ, zipSync
 } from "./course";
 import { camera, renderer, resizeRenderer, scene, updateSun } from "./gfx";
 import { autoForward, input, pressJump, setupInput } from "./input";
 import {
-  idleNinja, initOutfits, landSquash, poseAir, poseCelebrate, poseClimb, poseHang, poseRail,
-  poseRun, snapshotPose, syncNinja, tickPoseBlend, updateBlob, updatePony
+  idleNinja, initOutfits, landSquash, poseAir, poseCelebrate, poseClimb, poseHang, poseLedge,
+  poseRail, poseRun, poseWallRun, snapshotPose, syncNinja, tickPoseBlend, updateBlob, updatePony
 } from "./ninja";
 import { burstConfetti, puff, updateConfetti, updateDust } from "./particles";
-import { bestKey, getMode, isTower, setModeValue } from "./path";
-import { type Grab, endTrick, player, startTrick, trimTrick } from "./player";
+import { bestKey, getMode, setModeValue } from "./path";
+import { type Grab, type LedgeGrab, type WarpGrab, endTrick, player, startTrick, trimTrick } from "./player";
 import { initBalloons, initClouds, updateBalloons, updateClouds, updateSky } from "./sky";
 import * as ui from "./ui";
-import { clamp, damp, roundTo2Pi, storeGet, storeSet } from "./util";
+import { clamp, damp, roundTo2Pi, smoothstep, storeGet, storeSet } from "./util";
 
 // =============================================================================
 // game state
 // =============================================================================
 let state = State.TITLE;
+// testing flags: ?level=N starts the run at that level, ?slow=N scales the
+// clock (0.2 is one-fifth speed) so animations can be studied frame by frame
+const urlParams = new URLSearchParams(location.search);
+const startLevel = clamp(parseInt(urlParams.get("level") || "1", 10) || 1, 1, 10);
+let slowMo = clamp(parseFloat(urlParams.get("slow") || "1") || 1, 0.02, 1);
 let level = 1;
 let podiums = 0;
 let best = loadBest();
@@ -125,13 +131,25 @@ function grabDistance(g: Grab, hz: number, hy: number): number {
     const cy2 = g.yA + (g.yB - g.yA) * g.t - g.hang;
     return Math.hypot(hz - cz2, hy - cy2);
   }
-  return Infinity;
+  if (g.kind === "wall") {
+    // a surface, not a handle: the feet stick when they reach the front of
+    // the wall inside its height band, still running forward
+    if (!input.forward || player.vz < 0.5) return Infinity;
+    if (hz < g.z0 - 0.3 || hz > g.z0 + 2.0) return Infinity;
+    const fy = hy - HAND_H;
+    const k = clamp((hz - g.z0) / (g.z1 - g.z0), 0, 1);
+    if (fy < g.y0 + g.rise * k || fy > g.y1 + g.rise * k) return Infinity;
+    return 0;
+  }
+  return Infinity;   // the warped wall is reached by contact in updateFree, never grabbed
 }
 
 function grabZ(g: Grab): number {
   if (g.kind === "climb") return g.z;
-  if (g.kind === "rail") return (g.z0 + g.z1) / 2;
+  if (g.kind === "rail" || g.kind === "wall") return (g.z0 + g.z1) / 2;
   if (g.kind === "zip") return g.zA + (g.zB - g.zA) * g.t;
+  if (g.kind === "warp") return g.z0 + g.r / 2;
+  if (g.kind === "ledge") return g.z;
   return g.pz;
 }
 
@@ -161,7 +179,9 @@ function attach(g: Grab): void {
   player.hangT = 0;
   player.jumpBuf = 0;         // the press that grabbed must not also let go
   player.jumpCut = false;     // a grab ends the jump, so the lache is never cut
-  sfxGrab();
+  // running onto the warped wall is just footsteps, and the ledge plays its
+  // grab when the hands actually catch it at the top of the leap
+  if (g.kind !== "warp" && g.kind !== "ledge") sfxGrab();
   if (g.kind === "pend") {
     const dz = player.z - g.pz;
     const dy = (player.y + HAND_H) - g.py;
@@ -183,6 +203,19 @@ function attach(g: Grab): void {
     // carry the run speed into the trolley
     g.speed = Math.max(2.5, player.vz * 0.8);
     zipSync(g, true);
+  } else if (g.kind === "wall") {
+    const len = g.z1 - g.z0;
+    player.z = Math.max(player.z, g.z0);
+    const k = clamp((player.z - g.z0) / len, 0, 1);
+    player.y = clamp(player.y, g.y0 + g.rise * k + 0.2, g.y1 + g.rise * k - 0.2);
+    player.omega = 0;
+  } else if (g.kind === "warp") {
+    // onto the arc at the point level with the feet; g.u was set by the caller
+    g.p = warpAngleAtY(g, player.y) / (Math.PI / 2);
+    warpPos(g, g.p, player);
+    player.omega = 0;
+  } else if (g.kind === "ledge") {
+    player.omega = 0;   // the leap starts from where she is; updateLedge moves her
   }
   player.vz = 0; player.vy = 0;
   player.onGround = false;
@@ -220,6 +253,12 @@ function release(boost: boolean): void {
   } else if (g.kind === "zip") {
     player.vz = clamp(g.speed * 1.05 + 0.8, 4.5, 12);
     player.vy = 3.2;
+  } else if (g.kind === "wall") {
+    // a jump leaps off the wall; otherwise she is carried off the end at run speed
+    if (boost) { player.vz = 6.6; player.vy = 5.6; }
+    else { player.vz = WALL_SPEED; player.vy = 0; }
+  } else if (g.kind === "warp") {
+    player.vz = 0.5; player.vy = 3.0;   // a hop off the curve (the vault is handled in updateWarp)
   }
   if (boost) { player.vz += 0.4; player.vy += 0.4; }
   player.vz = clamp(player.vz, -6, 15);
@@ -237,12 +276,12 @@ function release(boost: boolean): void {
 // =============================================================================
 function startRun(): void {
   state = State.PLAYING;
-  level = 1;
+  level = startLevel;
   podiums = 0;
   medals = [];
   levelTime = 0;
   clearCourses();
-  current = generateCourse(1, 0, 0);
+  current = generateCourse(level, 0, 0);
   courses.push(current);
   rebuildWorldLists();
   spawn.z = current.spawn.z;
@@ -255,7 +294,7 @@ function startRun(): void {
   ui.renderMedals(medals);
   ui.updateHud(level, best, levelTime);
   startMusic();
-  ui.showTip(isTower() ? "Hold forward and jump the gaps - up we go!" : "Hold forward and jump the gaps!", 3.2);
+  ui.showTip("Hold forward, jump the gaps - and run up the warped wall at the end!", 3.6);
   // snap the camera behind the player right away
   snapCamera(spawn.z - 8.4, spawn.y + 3.4, spawn.z + 5.0, spawn.y + 1.4);
 }
@@ -338,7 +377,7 @@ function endCelebrate(): void {
   player.lastGroundY = spawn.y;
   state = State.PLAYING;
   ui.updateHud(level, best, levelTime);
-  if (level === 2) ui.showTip("Level 2 - swinging ropes and trampolines", 3.0);
+  if (level === 2) ui.showTip("Level 2 - ropes, trampolines and wall rides: keep running, then jump off!", 3.4);
   else if (level === 3) ui.showTip("Level 3 - lache bars and rope climbs", 3.0);
   else if (level === 4) ui.showTip("Level 4 - jump for the zipline handle!", 3.0);
 }
@@ -454,11 +493,169 @@ function updateHanging(dt: number, jumpPressed: boolean): void {
     }
     zipSync(g, true);
     poseHang(dt, 0.3);
+  } else if (g.kind === "wall") {
+    if (!input.forward) {
+      // stopped running: the feet peel off the wall
+      release(false);
+      player.vz = 3.0;
+      return;
+    }
+    const len = g.z1 - g.z0;
+    player.z += WALL_SPEED * dt;
+    player.y += (WALL_SPEED * g.rise / len - WALL_SAG) * dt;   // climbs with the coil, slips a little
+    const k = clamp((player.z - g.z0) / len, 0, 1);
+    if (player.z > g.z1 || player.y < g.y0 + g.rise * k) {
+      // carried off the far end, or slipped off the bottom of the wall
+      release(false);
+      return;
+    }
+    poseWallRun(dt, 0.28, g.side * 0.45, WALL_SPEED, 1);
+  } else if (g.kind === "warp") {
+    updateWarp(g, dt, jumpPressed);
+    return;
+  } else if (g.kind === "ledge") {
+    updateLedge(g, dt);
+    return;
   }
 
   if (player.hangT > 0.12 && (jumpPressed || player.jumpBuf > 0)) {
     player.jumpBuf = 0;
     release(true);
+  }
+}
+
+// the warped wall: a run up the arc that slows as it climbs. A full-speed
+// run just reaches the top; jump from the upper part to vault the ledge, or
+// slide back down to the base and go again
+function updateWarp(g: WarpGrab, dt: number, jumpPressed: boolean): void {
+  const L = g.r * Math.PI / 2;
+  const u0 = RUN_SPEED * WARP_BOOST;
+  const A = (u0 * u0) / (2 * L * WARP_PEAK);   // the slow-down that lets a full run reach the top
+  let decel = A;
+  if (g.u > 0 && !input.forward) decel = A * 3;   // stopped running: the wall wins quickly
+  else if (g.u < 0) decel = A * 0.7;             // the slide back is a little gentler
+  g.u -= decel * dt;
+  g.p += g.u * dt / L;
+  if (g.p >= 1) { g.p = 1; if (g.u > 0) g.u = 0; }
+
+  if (g.p <= 0 && g.u <= 0) {
+    // slid back down to the base: back on the run-up, ready for another go
+    const preZ = player.z;
+    player.hang = null;
+    player.z = g.z0 - 0.9;
+    player.y = g.y0;
+    player.vz = -2.0; player.vy = 0;
+    player.onGround = true;
+    player.coyote = COYOTE;
+    player.air = 0;
+    player.lastGroundY = g.y0;
+    player.releaseLock = RELEASE_LOCK;
+    player.visOffZ = clamp(preZ - player.z, -2.5, 2.5);
+    endTrick();
+    snapshotPose();
+    landSquash(0.12, 0.4);
+    puff(0, g.y0, player.z, 6, 0.35, 1.6);
+    sfxLand();
+    return;
+  }
+
+  warpPos(g, g.p, player);
+  const a = g.p * Math.PI / 2;
+  // the feet stand a touch off the surface along its normal, so the body
+  // never sinks into the ramp as it steepens
+  player.z -= 0.22 * Math.sin(a);
+  player.y += 0.22 * Math.cos(a);
+  // a sprint lean at the bottom; higher up the torso may lean forward only
+  // as far as the wall's tangent, so it stays just clear of the surface.
+  // The stride shortens too, or the forward foot would swing into the wall
+  const lean = Math.min(0.3, Math.PI / 2 - a - 0.2);
+  const stride = clamp(1 - g.p * 0.7, 0.3, 1);
+  poseWallRun(dt, lean, 0, g.u, stride);
+
+  if (player.hangT > 0.12 && (jumpPressed || player.jumpBuf > 0)) {
+    player.jumpBuf = 0;
+    if (g.p >= WARP_WINDOW) {
+      // high enough: leap up, catch the ledge with both hands and pull up
+      startLedge(g);
+    } else {
+      // too early: a little hop off the curve, and gravity brings her back onto it
+      player.vz = 0.5; player.vy = 3.0;
+      leaveWarp();
+      sfxWhoosh();
+    }
+  }
+}
+
+function leaveWarp(): void {
+  player.hang = null;
+  endTrick();
+  snapshotPose();
+  player.releaseLock = RELEASE_LOCK;
+  player.air = 0.05;
+}
+
+// the ledge: from high on the arc she leaps straight up the wall, the hands
+// catch the edge right at the top of the leap, she holds the grip for a beat
+// and pulls herself up and over onto the summit. The whole thing is scripted
+// (no free flight), so the catch always lands on the edge
+function startLedge(w: WarpGrab): void {
+  const zEdge = w.z0 + w.r, top = w.y0 + w.r + w.lip;
+  const zL = player.z, yL = player.y;
+  // the hands catch the edge. From the window the body ends up hanging under
+  // it with the arms straight; from the very top of the curve, where the
+  // chest is nearly level with the ledge already, it is a short hop and a
+  // catch at chest height
+  const yH = Math.max(top - HAND_H, yL + 0.35);
+  const zH = warpSurfaceZ(w, yH) - 0.3;   // the body just clear of the lip under the edge
+  const vy = Math.sqrt(2 * GRAVITY * (yH - yL));
+  const g: LedgeGrab = {
+    kind: "ledge", z: zEdge, y: top, t: 0,
+    zL: zL, yL: yL, zH: zH, yH: yH, leapT: vy / GRAVITY, vy: vy
+  };
+  attach(g);
+  sfxJump();
+}
+
+function updateLedge(g: LedgeGrab, dt: number): void {
+  const t0 = g.t;
+  g.t += dt;
+  const t = g.t;
+  if (t < g.leapT) {
+    // the leap: a ballistic rise that peaks where the hands meet the edge
+    const k = t / g.leapT;
+    player.z = g.zL + (g.zH - g.zL) * k;
+    player.y = g.yL + g.vy * t - 0.5 * GRAVITY * t * t;
+    poseLedge(dt, g.z - player.z, g.y - player.y, -1);
+    return;
+  }
+  if (t0 < g.leapT) {
+    // the catch: the hands take the weight and the body sags into the hang
+    player.z = g.zH; player.y = g.yH;
+    player.visOffY = 0.14;
+    sfxGrab();
+  }
+  const m = clamp((t - g.leapT - LEDGE_HOLD) / LEDGE_PULL, 0, 1);
+  // the body pulls up first, then swings forward over the edge
+  const up = smoothstep(clamp(m / 0.65, 0, 1));
+  const over = smoothstep(clamp((m - 0.5) / 0.5, 0, 1));
+  player.y = g.yH + (g.y - g.yH) * up;
+  player.z = g.zH + (g.z + LEDGE_STEP - g.zH) * over;
+  poseLedge(dt, g.z - player.z, g.y - player.y, m);
+  if (m >= 1) {
+    // on her feet on the summit
+    player.hang = null;
+    player.onGround = true;
+    player.vz = input.forward ? RUN_SPEED * 0.6 : 1.0;
+    player.vy = 0;
+    player.coyote = COYOTE;
+    player.air = 0;
+    player.lastGroundY = g.y;
+    player.releaseLock = 0;
+    endTrick();
+    snapshotPose();
+    landSquash(0.1, 0.3);
+    puff(0, g.y + 0.02, player.z, 4, 0.3, 1.2);
+    sfxStep();
   }
 }
 
@@ -583,6 +780,39 @@ function updateFree(dt: number, jumpPressed: boolean): void {
   }
   if (!player.onGround && player.coyote > 0) player.coyote -= dt;
 
+  // the warped wall: running onto its base starts the run up; flying into the
+  // curve (or the back of it, under the ledge) sticks the feet to it and she
+  // slides back down
+  for (let i = 0; i < grabs.length; i++) {
+    const g = grabs[i];
+    if (g.kind !== "warp") continue;
+    if (player.z < g.z0 || player.z > g.z0 + g.r + 1.5) continue;
+    const top = g.y0 + g.r;
+    if (player.onGround) {
+      if (player.y > g.y0 + 0.1) continue;   // standing on the summit, not the run-up
+      // the speed up the arc comes from the run; not holding forward is a weak start
+      g.u = Math.max(0, player.vz) * WARP_BOOST * (input.forward ? 1 : 0.5);
+      attach(g);
+      return;
+    }
+    // in the air. Not right after leaving the wall - that is the vault (or the
+    // hop) on its way up, and it must clear the surface first
+    if (player.releaseLock > 0) continue;
+    if (player.y >= top - 0.05 || player.y < g.y0 - 2.0) continue;
+    const yy = Math.max(player.y, g.y0);   // under the base counts as the base
+    const zs = warpSurfaceZ(g, yy);
+    if (player.z < zs - 0.02) continue;
+    const a = warpAngleAtY(g, yy);
+    if (player.vy > 0 && a > 1.25) continue;   // rising past the ledge, not hitting the wall
+    player.z = zs;
+    player.y = yy;
+    // whatever speed was along the surface carries on along it
+    const tangent = player.vz * Math.cos(a) + player.vy * Math.sin(a);
+    g.u = clamp(tangent * (input.forward ? 0.9 : 0.3), -RUN_SPEED * WARP_BOOST, RUN_SPEED * WARP_BOOST);
+    attach(g);
+    return;
+  }
+
   // pose
   if (player.onGround) poseRun(dt);
   else poseAir(dt);
@@ -600,6 +830,7 @@ function frame(now: number): void {
   last = now;
   if (!(dt > 0)) dt = 0.016;
   if (dt > 0.1) dt = 0.1;      // never tunnel after a stall
+  dt *= slowMo;
 
   // fixed-ish steps keep the physics stable on slow frames
   acc += dt;
@@ -674,9 +905,29 @@ function boot(): void {
 
 boot();
 
-// hidden demo mode for screenshots and testing: ?auto runs and jumps by itself
-if (location.search.indexOf("auto") >= 0) {
+// ?test=<rig> (see course.ts) skips the title and drops straight onto a course
+// that is just that rig; ?auto is the hidden demo mode that runs and jumps by
+// itself (for screenshots and testing)
+if (testObstacle) {
+  // hooks for a test harness: read the player state, drive the input, slow the clock
+  (window as unknown as { __ninja: unknown }).__ninja = {
+    player: player, pressJump: pressJump, autoForward: autoForward,
+    setSlow: function (s: number) { slowMo = clamp(s, 0.02, 1); }
+  };
+  if (!urlParams.has("auto")) startRun();
+}
+if (urlParams.has("auto")) {
   startRun();
   autoForward();
-  setInterval(pressJump, 900);
+  // a blind metronome everywhere, except on the warped wall, where it waits
+  // for the jump window so the demo clears the finale (and holds its fire
+  // through the pull-up over the ledge)
+  setInterval(function () {
+    const g = player.hang;
+    if (!(g && (g.kind === "warp" || g.kind === "ledge"))) pressJump();
+  }, 900);
+  setInterval(function () {
+    const g = player.hang;
+    if (g && g.kind === "warp" && g.p >= WARP_WINDOW + 0.05 && player.hangT > 0.12) pressJump();
+  }, 100);
 }
