@@ -39,13 +39,21 @@ Ninja Adventure is a third-person 3D obstacle-course game in a bright cartoon lo
 - Reach the podium at the end of each level to get a gold, silver, or bronze medal. The faster you are, the better the medal.
 - If you fall, you go back to the last podium and try again.
 - The game is endless. Your score is the number of podiums you reach.
-- Your best run is saved in the browser.
+- Your best run is saved in the browser, separately for each course.
+
+### Courses
+
+Pick a course on the title screen:
+
+- **Straight** — the course runs in a straight line through the sky.
+- **Tower** — the course spirals up and around a tower: every obstacle climbs a little higher, and each level keeps winding up the same coil. The camera rides around with you.
 
 ### Controls
 
 - **Hold W / Up** — run (on touch, hold the left half of the screen)
 - **Space** — jump / grab / release (on touch, tap the right half of the screen)
 - **M** — mute / unmute the sound
+- Tap **Straight** / **Tower** on the title screen to pick the course (`?mode=tower` in the URL also works)
 
 ## Bee Draw
 

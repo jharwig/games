@@ -164,7 +164,7 @@
     color: #16324f; text-transform: uppercase; margin: 0 0 8px;
   }
   .outfitRow { display: flex; gap: 14px; justify-content: center; }
-  .outfitBtn {
+  .outfitBtn, .modeBtn {
     display: flex; flex-direction: column; align-items: center; gap: 4px;
     padding: 8px 12px 6px;
     background: rgba(255,255,255,0.9);
@@ -175,14 +175,18 @@
     touch-action: manipulation;
     font: inherit;
   }
-  .outfitBtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(22,50,79,0.25); }
-  .outfitBtn.selected { border-color: #ff2e88; background: #fff; box-shadow: 0 3px 0 rgba(255,46,136,0.35); }
+  .outfitBtn:active, .modeBtn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(22,50,79,0.25); }
+  .outfitBtn.selected, .modeBtn.selected { border-color: #ff2e88; background: #fff; box-shadow: 0 3px 0 rgba(255,46,136,0.35); }
   .outfitBtn canvas { width: 44px; height: 62px; image-rendering: pixelated; }
-  .outfitBtn span {
+  .outfitBtn span, .modeBtn span {
     font-size: 11px; font-weight: 800; letter-spacing: 0.07em;
     color: #16324f; text-transform: uppercase;
   }
   #titleOutfits { margin: 0 0 14px; }
+  /* course mode picker: straight line or a spiral up a tower */
+  .modeBtn { min-width: 84px; padding: 6px 12px 6px; }
+  .modeBtn b { font-size: 22px; line-height: 1.1; color: #16324f; }
+  #titleModes { margin: 0 0 14px; }
   #outfitPick {
     position: fixed; left: 0; right: 0;
     bottom: calc(env(safe-area-inset-bottom, 0px) + 64px);
@@ -313,6 +317,11 @@
       <b>M</b><span>Mute / unmute</span>
       <b>Touch</b><span>Hold left half to run, tap right half to jump</span>
     </div>
+    <div class="outfitLbl">Pick a course</div>
+    <div id="titleModes" class="outfitRow">
+      <button type="button" class="modeBtn" data-mode="straight"><b>&rarr;</b><span>Straight</span></button>
+      <button type="button" class="modeBtn" data-mode="tower"><b>&#8635;</b><span>Tower</span></button>
+    </div>
     <div class="outfitLbl">Pick an outfit</div>
     <div id="titleOutfits" class="outfitRow"></div>
     <p id="titleBest">BEST RUN: 0 PODIUMS</p>
@@ -378,6 +387,45 @@ function storeGet(k, d) {
 function storeSet(k, v) {
   try { localStorage.setItem(k, v); } catch (e) {}
 }
+
+// =============================================================================
+// travel modes: the course either runs in a straight line or spirals up and
+// around an (invisible) tower. Physics is 1-D either way - player.z is the
+// distance along the course - and only the presentation maps that distance,
+// a sideways offset and a height to a world position via pathPos().
+// =============================================================================
+var TOWER_R    = 16;    // helix radius; the tower is on the player's left
+var TOWER_RISE = 1.0;   // extra height each obstacle's landing gains, so the coil climbs
+var CAM_OUT    = 1.5;   // the chase camera rides a little outside the coil to see it curve
+var PATH_CHUNK = 2.0;   // long boxes / tubes are split into pieces this long to hug the arc
+
+var mode = storeGet("ninja.mode", "straight");
+(function () {
+  var q = /[?&]mode=(\w+)/.exec(location.search);
+  if (q) mode = q[1];
+  if (mode !== "tower") mode = "straight";
+})();
+function isTower() { return mode === "tower"; }
+function bestKey() { return isTower() ? "ninja.best.tower" : "ninja.best"; }
+
+// distance along the course s, sideways x (+x is toward the tower), height y
+// -> world position. Straight mode is the identity: x, y, z = s.
+function pathPos(s, x, y, out) {
+  if (!isTower()) { out.set(x, y, s); return out; }
+  var a = s / TOWER_R, r = TOWER_R - x;
+  out.set(TOWER_R - r * Math.cos(a), y, r * Math.sin(a));
+  return out;
+}
+// heading (yaw about Y) of the course at distance s; +Z at s = 0
+function pathYaw(s) { return isTower() ? s / TOWER_R : 0; }
+function placeOnPath(obj, s, x, y) {
+  pathPos(s, x, y, obj.position);
+  obj.rotation.y = pathYaw(s);
+  return obj;
+}
+// how many pieces a part of length len needs so it follows the arc
+function pathChunks(len) { return isTower() ? Math.max(1, Math.ceil(len / PATH_CHUNK)) : 1; }
+var tmpV = new THREE.Vector3();
 
 // =============================================================================
 // audio - chiptune via Web Audio, only started after a user gesture
@@ -607,26 +655,66 @@ function shade(hex, k) {
   return tmpColor.getHex();
 }
 
+// Parents flagged userData.path (a course group) take course coordinates:
+// z is the distance along the course and x is sideways. Parts are placed on
+// the path, and anything long along z is split into pieces that hug the arc.
 function box(parent, x, y, z, w, h, d, hex, shadowCast) {
-  var m = new THREE.Mesh(GEO.box, mat(hex));
-  m.position.set(x, y, z);
-  m.scale.set(w, h, d);
-  m.receiveShadow = true;
-  if (shadowCast) m.castShadow = true;
-  parent.add(m);
-  return m;
+  var onPath = !!parent.userData.path;
+  var n = onPath ? pathChunks(d) : 1;
+  var len = d / n;
+  // pieces overlap a touch so the outer edge of a wide slab never shows a wedge gap
+  var ext = n > 1 ? len + (w / 2) * (len / TOWER_R) + 0.02 : d;
+  var first = null;
+  for (var i = 0; i < n; i++) {
+    var m = new THREE.Mesh(GEO.box, mat(hex));
+    if (onPath) placeOnPath(m, z - d / 2 + len * (i + 0.5), x, y);
+    else m.position.set(x, y, z);
+    m.scale.set(w, h, ext);
+    m.receiveShadow = true;
+    if (shadowCast) m.castShadow = true;
+    parent.add(m);
+    if (!first) first = m;
+  }
+  return first;
 }
 
 // cylinder along Y by default; axis "x" or "z" rotates it
 function tube(parent, x, y, z, r, len, hex, axis) {
-  var m = new THREE.Mesh(GEO.cyl, mat(hex));
-  m.position.set(x, y, z);
-  m.scale.set(r, len, r);
-  if (axis === "x") m.rotation.z = Math.PI / 2;
-  else if (axis === "z") m.rotation.x = Math.PI / 2;
-  m.receiveShadow = true;
-  parent.add(m);
-  return m;
+  var onPath = !!parent.userData.path;
+  var n = onPath && axis === "z" ? pathChunks(len) : 1;
+  var seg = len / n;
+  var first = null;
+  for (var i = 0; i < n; i++) {
+    var m = new THREE.Mesh(GEO.cyl, mat(hex));
+    if (onPath) placeOnPath(m, axis === "z" ? z - len / 2 + seg * (i + 0.5) : z, x, y);
+    else m.position.set(x, y, z);
+    m.scale.set(r, n > 1 ? seg + 0.06 : len, r);
+    // rotate about the mesh's own axes, so the yaw from the path is kept
+    if (axis === "x") m.rotateZ(Math.PI / 2);
+    else if (axis === "z") m.rotateX(Math.PI / 2);
+    m.receiveShadow = true;
+    parent.add(m);
+    if (!first) first = m;
+  }
+  return first;
+}
+
+// a straight tube from (z0, y0) to (z1, y1) on the course, split along the
+// arc; used for the zipline wire
+function pathWire(parent, z0, y0, z1, y1, r, hex) {
+  var span = z1 - z0, drop = y0 - y1;
+  var n = pathChunks(span);
+  var tilt = Math.atan2(-span, drop);
+  var segLen = Math.hypot(span, drop) / n;
+  for (var i = 0; i < n; i++) {
+    var t = (i + 0.5) / n;
+    var m = new THREE.Mesh(GEO.cyl, mat(hex));
+    placeOnPath(m, z0 + span * t, 0, y0 - drop * t);
+    m.scale.set(r, n > 1 ? segLen + 0.06 : segLen, r);
+    m.rotateX(tilt);
+    m.receiveShadow = true;
+    parent.add(m);
+  }
 }
 
 // =============================================================================
@@ -701,14 +789,17 @@ var CLOUD_SPAN = 260;
 function placeCloud(i, z) {
   cloudZ[i] = z;
   var below = Math.random() < 0.55;
-  var cy = below ? rand(-34, -11) : rand(11, 34);
-  var cx = (Math.random() < 0.5 ? -1 : 1) * rand(14, 78);
+  // heights follow the player, so a climbing tower course keeps its clouds
+  var cy = player.y + (below ? rand(-34, -11) : rand(11, 34));
+  // on the tower every cloud sits outside the coil, leaving the middle clear
+  var cx = (isTower() || Math.random() < 0.5 ? -1 : 1) * rand(14, 78);
   var s = rand(2.4, 5.6);
+  pathPos(z, cx, cy, tmpV);
   for (var p = 0; p < PUFFS; p++) {
     cloudObj.position.set(
-      cx + rand(-s * 1.15, s * 1.15),
-      cy + rand(-s * 0.24, s * 0.24),
-      z + rand(-s * 0.9, s * 0.9)
+      tmpV.x + rand(-s * 1.15, s * 1.15),
+      tmpV.y + rand(-s * 0.24, s * 0.24),
+      tmpV.z + rand(-s * 0.9, s * 0.9)
     );
     cloudObj.rotation.set(rand(0, 3.14), rand(0, 3.14), rand(0, 3.14));
     cloudObj.scale.setScalar(s * rand(0.6, 1.05));
@@ -753,8 +844,8 @@ var balloons = [];
 
 function placeBalloon(b, z) {
   b.z = z;
-  b.x = (Math.random() < 0.5 ? -1 : 1) * rand(18, 55);
-  b.y = rand(-6, 20);
+  b.x = (isTower() || Math.random() < 0.5 ? -1 : 1) * rand(18, 55);
+  b.y = player.y + rand(-6, 20);
   b.g.scale.setScalar(rand(0.9, 1.7));
 }
 function initBalloons(centerZ) {
@@ -764,7 +855,7 @@ function updateBalloons(now, z) {
   for (var i = 0; i < balloons.length; i++) {
     var b = balloons[i];
     if (b.z < z - 60) placeBalloon(b, z + rand(120, 220));
-    b.g.position.set(b.x, b.y + Math.sin(now * 0.0005 + b.phase) * 1.2, b.z);
+    pathPos(b.z, b.x, b.y + Math.sin(now * 0.0005 + b.phase) * 1.2, b.g.position);
   }
 }
 
@@ -798,13 +889,15 @@ var confActive = false;
   confMesh.instanceMatrix.needsUpdate = true;
 })();
 
+// x is sideways on the course, z the distance along it
 function burstConfetti(x, y, z) {
+  pathPos(z, x, y, tmpV);
   for (var i = 0; i < CONF_N; i++) {
     var a = Math.random() * Math.PI * 2;
     var sp = rand(2.5, 9.5);
-    confP[i * 3] = x + rand(-1.2, 1.2);
-    confP[i * 3 + 1] = y + rand(0, 1.2);
-    confP[i * 3 + 2] = z + rand(-1.2, 1.2);
+    confP[i * 3] = tmpV.x + rand(-1.2, 1.2);
+    confP[i * 3 + 1] = tmpV.y + rand(0, 1.2);
+    confP[i * 3 + 2] = tmpV.z + rand(-1.2, 1.2);
     confV[i * 3] = Math.cos(a) * sp * 0.55;
     confV[i * 3 + 1] = rand(6, 13);
     confV[i * 3 + 2] = Math.sin(a) * sp * 0.55;
@@ -873,13 +966,15 @@ var dustHead = 0, dustActive = false;
   dustMesh.instanceMatrix.needsUpdate = true;
 })();
 
+// x is sideways on the course, z the distance along it
 function puff(x, y, z, n, spread, up) {
+  pathPos(z, x, y, tmpV);
   for (var k = 0; k < n; k++) {
     var i = dustHead++ % DUST_N;
     var a = Math.random() * Math.PI * 2;
-    dustP[i * 3] = x + Math.cos(a) * rand(0, spread);
-    dustP[i * 3 + 1] = y + rand(0, 0.15);
-    dustP[i * 3 + 2] = z + Math.sin(a) * rand(0, spread);
+    dustP[i * 3] = tmpV.x + Math.cos(a) * rand(0, spread);
+    dustP[i * 3 + 1] = tmpV.y + rand(0, 0.15);
+    dustP[i * 3 + 2] = tmpV.z + Math.sin(a) * rand(0, spread);
     dustV[i * 3] = Math.cos(a) * rand(0.4, 1.6);
     dustV[i * 3 + 1] = rand(0.4, up);
     dustV[i * 3 + 2] = Math.sin(a) * rand(0.4, 1.6) - 0.5;
@@ -1143,7 +1238,7 @@ function updateBlob() {
   if (gy === -Infinity) { blob.visible = false; return; }
   var h = player.y - gy;
   blob.visible = true;
-  blob.position.set(0, gy + 0.03, player.z);
+  pathPos(player.z, 0, gy + 0.03, blob.position);
   blob.scale.setScalar(clamp(0.62 - h * 0.022, 0.3, 0.62));
   blob.material.opacity = clamp(0.3 - h * 0.012, 0.1, 0.3);
 }
@@ -1192,12 +1287,13 @@ function addBunting(c, z0, z1, y, w) {
   var step = (z1 - z0) / n;
   var top = y + 3.1;
   var col3 = new THREE.Color();
+  function vert(s, x, y) { pathPos(s, x, y, tmpV); pos.push(tmpV.x, tmpV.y, tmpV.z); }
   for (var side = -1; side <= 1; side += 2) {
     var x = side * (w / 2 + 0.35);
     for (var i = 0; i < n; i++) {
       var za = z0 + i * step, zb = za + step;
       var sag = 0.34;
-      pos.push(x, top, za, x, top, zb, x, top - sag - 0.62, (za + zb) / 2);
+      vert(za, x, top); vert(zb, x, top); vert((za + zb) / 2, x, top - sag - 0.62);
       col3.setHex(PALETTE[(i + (side > 0 ? 3 : 0)) % PALETTE.length]);
       for (var v = 0; v < 3; v++) col.push(col3.r, col3.g, col3.b);
     }
@@ -1218,11 +1314,13 @@ function finishBunting(c) {
 var buntMat = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 var starMat = new THREE.MeshLambertMaterial({ color: 0xffe200, emissive: 0x8a6a00 });
 
-// ---- obstacle builders. Each returns the new { z, y } cursor. ----
+// ---- obstacle builders. Each returns the new { z, y } cursor. c.rise is the
+// extra height every landing gains (0 on a straight course). ----
 
 function buildGap(c, z, y, d) {
-  var gap = 2.2 + d * 2.6 + rand(0, 0.6);
-  var ny = y + (Math.random() - 0.38) * 1.6 * d;
+  // a rising landing needs a slightly shorter gap to stay jumpable at high d
+  var gap = 2.2 + d * 2.6 + rand(0, 0.6) - c.rise * 0.5 * d;
+  var ny = y + c.rise + (Math.random() - 0.38) * 1.6 * d;
   var len = 7.5 - d * 3.6 + rand(0, 2);
   addPlatform(c, z + gap, z + gap + len, ny, Math.max(2.2, 3.4 - d * 1.2), pickColor());
   c.est += 1.15 + len / RUN_SPEED;
@@ -1252,9 +1350,9 @@ function buildRail(c, z, y, d) {
 
   var lz = z1 + 1.8;
   var len = 7 - d * 2.6 + rand(0, 2);
-  addPlatform(c, lz, lz + len, y, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  addPlatform(c, lz, lz + len, y + c.rise, Math.max(2.4, 3.4 - d * 1.0), pickColor());
   c.est += 1.4 + railLen / RAIL_SPEED + len / RUN_SPEED;
-  return { z: lz + len, y: y };
+  return { z: lz + len, y: y + c.rise };
 }
 
 function buildSwing(c, z, y, d) {
@@ -1269,7 +1367,8 @@ function buildSwing(c, z, y, d) {
   for (var i = 0; i < n; i++) {
     var rz = z + 2.4 + i * spacing;
     var pivot = new THREE.Group();
-    pivot.position.set(0, anchorY, rz);
+    pivot.rotation.order = "YXZ";       // heading from the path first, then the swing
+    placeOnPath(pivot, rz, 0, anchorY);
     c.group.add(pivot);
     var rc = PALETTE[(i * 3 + 1) % PALETTE.length];
     tube(pivot, 0, -ropeLen / 2, 0, 0.075, ropeLen, 0xf0e2c0);   // rope
@@ -1280,9 +1379,9 @@ function buildSwing(c, z, y, d) {
   var lastZ = z + 2.4 + (n - 1) * spacing;
   var lz = lastZ + 5.6 + d * 0.8;
   var len = 7 - d * 2.4 + rand(0, 2);
-  addPlatform(c, lz, lz + len, y, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  addPlatform(c, lz, lz + len, y + c.rise, Math.max(2.4, 3.4 - d * 1.0), pickColor());
   c.est += 1.6 + n * 2.3 + len / RUN_SPEED;
-  return { z: lz + len, y: y };
+  return { z: lz + len, y: y + c.rise };
 }
 
 function buildLache(c, z, y, d) {
@@ -1304,13 +1403,13 @@ function buildLache(c, z, y, d) {
   var lastZ = z + 2.3 + (n - 1) * spacing;
   var lz = lastZ + 3.4;
   var len = 7 - d * 2.4 + rand(0, 2);
-  addPlatform(c, lz, lz + len, y, Math.max(2.4, 3.4 - d * 1.0), pickColor());
+  addPlatform(c, lz, lz + len, y + c.rise, Math.max(2.4, 3.4 - d * 1.0), pickColor());
   c.est += 1.4 + n * 1.7 + len / RUN_SPEED;
-  return { z: lz + len, y: y };
+  return { z: lz + len, y: y + c.rise };
 }
 
 function buildClimb(c, z, y, d) {
-  var rise = 3.0 + d * 2.6;
+  var rise = 3.0 + d * 2.6 + c.rise;
   var rz = z + 2.6;
   var yTop = y + rise + 2.4;
   var yBot = y + 0.2;
@@ -1336,7 +1435,7 @@ function buildClimb(c, z, y, d) {
 
 function buildBounce(c, z, y, d) {
   var gap = 1.8 + d * 0.8;
-  var rise = 3.2 + d * 2.2;
+  var rise = 3.2 + d * 2.2 + c.rise;
   var padZ = z + gap + 1.45;
   var hex = pickColor();
   var frame = shade(hex, 0.5);
@@ -1362,7 +1461,7 @@ function buildZip(c, z, y, d) {
   var towerZ = z + 1.6;
   var topY = y + 4.4;
   var span = 9 + d * 5 + rand(0, 2);
-  var drop = 2.4 + d * 1.2;
+  var drop = 2.4 + d * 1.2 - c.rise;   // a shallower wire lands the rise higher
   var endZ = towerZ + span;
   var endY = topY - drop;
   var landY = endY - 2.9;
@@ -1377,11 +1476,10 @@ function buildZip(c, z, y, d) {
 
   // the wire, tilted to run bar to bar
   var wireLen = Math.hypot(span, drop);
-  var wire = tube(c.group, 0, (topY + endY) / 2 + 0.3, (towerZ + endZ) / 2, 0.05, wireLen, 0xf0e2c0);
-  wire.rotation.x = Math.atan2(-span, drop);
+  pathWire(c.group, towerZ, topY + 0.3, endZ, endY + 0.3, 0.05, 0xf0e2c0);
 
   // the trolley: wheel block, rope, fat handle
-  var trolley = new THREE.Group();
+  var trolley = new THREE.Group();   // its parts are local, placed by zipSync
   c.group.add(trolley);
   box(trolley, 0, 0.04, 0, 0.36, 0.3, 0.46, hex);
   tube(trolley, 0, -0.5, 0, 0.06, 1.0, 0xf0e2c0);
@@ -1403,7 +1501,7 @@ function buildZip(c, z, y, d) {
 function zipSync(g, withPlayer) {
   var cz = g.zA + (g.zB - g.zA) * g.t;
   var cy = g.yA + (g.yB - g.yA) * g.t;
-  if (g.node) g.node.position.set(0, cy, cz);
+  if (g.node) placeOnPath(g.node, cz, 0, cy);
   if (withPlayer) {
     player.z = cz;
     player.y = cy - g.hang - HAND_H;
@@ -1447,7 +1545,7 @@ function buildPodium(c, z, y) {
 
   // a spinning gold star marks the goal
   var star = new THREE.Mesh(GEO.oct, starMat);
-  star.position.set(0, goldTop + 1.7, pz);
+  placeOnPath(star, pz, 0, goldTop + 1.7);
   star.scale.setScalar(0.6);
   g.add(star);
   c.podium.star = star;
@@ -1464,8 +1562,10 @@ function generateCourse(index, startZ, startY) {
   var c = {
     index: index, group: new THREE.Group(), platforms: [], grabs: [], blockers: [],
     geos: [], bunt: { pos: [], col: [] }, est: 0, podium: null,
-    startZ: startZ, startY: startY, d: d
+    startZ: startZ, startY: startY, d: d,
+    rise: isTower() ? TOWER_RISE : 0      // how much each obstacle climbs the coil
   };
+  c.group.userData.path = true;           // its parts take course coordinates
   scene.add(c.group);
 
   var z = startZ, y = startY;
@@ -1491,7 +1591,8 @@ function generateCourse(index, startZ, startY) {
     z = r.z; y = r.y;
   }
 
-  // run up to the podium
+  // run up to the podium (one more landing, so it climbs too)
+  y += c.rise;
   addPlatform(c, z + 2.0 + d * 1.4, z + 2.0 + d * 1.4 + 7, y, 4.0, pickColor());
   c.est += 1.2 + 7 / RUN_SPEED;
   z = z + 2.0 + d * 1.4 + 7;
@@ -1516,12 +1617,22 @@ var FADE_START = 5.5;   // metres from the camera where the fade begins
 var FADE_END   = 2.0;   // fully faded by here
 var FADE_MIN   = 0.12;  // faded things stay faintly visible
 
+var fadeBox = new THREE.Box3();
 function collectFadeMeshes(c) {
   c.fadeMeshes = [];
+  c.group.updateMatrixWorld(true);
   c.group.traverse(function (m) {
     if (!m.isMesh) return;
     if (m.material === buntMat) return;   // one merged strip spans the course
     m.userData.fadeOp = 1;
+    // world-aligned half extents, so parts turned to follow the coil still
+    // measure right
+    fadeBox.setFromObject(m);
+    m.userData.fadeHalf = [
+      (fadeBox.max.x - fadeBox.min.x) / 2,
+      (fadeBox.max.y - fadeBox.min.y) / 2,
+      (fadeBox.max.z - fadeBox.min.z) / 2
+    ];
     c.fadeMeshes.push(m);
   });
 }
@@ -1531,16 +1642,17 @@ function updateNearFade(dt) {
   for (var i = 0; i < courses.length; i++) {
     var c = courses[i];
     if (!c.fadeMeshes) continue;
-    // whole course nowhere near the lens - skip it
-    if (camera.position.z < c.startZ - 25 || camera.position.z > c.endZ + 25) continue;
+    // whole course nowhere near the lens - skip it (the camera trails by 8.4)
+    if (player.z < c.startZ - 34 || player.z > c.endZ + 25) continue;
     for (var j = 0; j < c.fadeMeshes.length; j++) {
       var m = c.fadeMeshes[j];
       m.getWorldPosition(fadeV);
+      var half = m.userData.fadeHalf;
       // distance from the camera to the mesh's box, not its centre, so long
       // slabs only fade when their near edge really reaches the lens
-      var dx = Math.max(0, Math.abs(fadeV.x - camera.position.x) - m.scale.x / 2);
-      var dy = Math.max(0, Math.abs(fadeV.y - camera.position.y) - m.scale.y / 2);
-      var dz = Math.max(0, Math.abs(fadeV.z - camera.position.z) - m.scale.z / 2);
+      var dx = Math.max(0, Math.abs(fadeV.x - camera.position.x) - half[0]);
+      var dy = Math.max(0, Math.abs(fadeV.y - camera.position.y) - half[1]);
+      var dz = Math.max(0, Math.abs(fadeV.z - camera.position.z) - half[2]);
       var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
       var target = clamp((dist - FADE_END) / (FADE_START - FADE_END), 0, 1);
       target = FADE_MIN + (1 - FADE_MIN) * target;
@@ -1586,8 +1698,11 @@ function disposeCourse(c) {
 var state = TITLE;
 var level = 1;
 var podiums = 0;
-var best = parseInt(storeGet("ninja.best", "0"), 10) || 0;
-if (!isFinite(best) || best < 0) best = 0;
+var best = loadBest();
+function loadBest() {
+  var b = parseInt(storeGet(bestKey(), "0"), 10) || 0;
+  return (!isFinite(b) || b < 0) ? 0 : b;
+}
 var medals = [];
 var levelTime = 0;
 var celebrateT = 0;
@@ -1932,12 +2047,22 @@ function startRun() {
   renderMedals();
   updateHud();
   startMusic();
-  showTip("Hold forward and jump the gaps!", 3.2);
+  showTip(isTower() ? "Hold forward and jump the gaps - up we go!" : "Hold forward and jump the gaps!", 3.2);
   // snap the camera behind the player right away
-  camera.position.set(0, spawn.y + 3.4, spawn.z - 8.4);
-  camBaseY = camera.position.y;
-  camBaseZ = camera.position.z;
+  snapCamera(spawn.z - 8.4, spawn.y + 3.4, spawn.z + 5.0, spawn.y + 1.4);
 }
+
+// put the chase camera straight at a course position, no easing
+function snapCamera(backZ, y, lookZ, lookY) {
+  camBaseZ = backZ;
+  camBaseY = y;
+  camLookZ = lookZ;
+  camLookY = lookY;
+  pathPos(camBaseZ, camLat(), camBaseY, camera.position);
+  camera.lookAt(pathPos(camLookZ, 0, camLookY, tmpV));
+}
+// the camera rides a little outside the coil so the path ahead curves in view
+function camLat() { return isTower() ? -CAM_OUT : 0; }
 
 function respawn() {
   player.z = spawn.z;
@@ -1973,7 +2098,7 @@ function completeLevel() {
   podiums++;
   if (podiums > best) {
     best = podiums;
-    storeSet("ninja.best", String(best));
+    storeSet(bestKey(), String(best));
   }
   renderMedals();
   updateHud();
@@ -2573,12 +2698,13 @@ function camImpulse(amp) {
   camDip = Math.max(camDip, amp * 0.55);
 }
 
+// the chase camera works in course coordinates (distance along, height) and is
+// mapped to the world at the end, so it rides around the tower with the player
 function updateCamera(dt) {
   camT += dt;
   var tz = player.z - 8.4;
   var ty = player.y + 3.4;
   var lambda = started ? 7 : 60;
-  if (!started) { camBaseY = camera.position.y; camBaseZ = camera.position.z; }
   camBaseZ = damp(camBaseZ, tz, lambda, dt);
   camBaseY = damp(camBaseY, ty, lambda * 0.75, dt);
 
@@ -2593,7 +2719,7 @@ function updateCamera(dt) {
     if (shakeT <= 0) shakeAmp = 0;
   }
   camDip = damp(camDip, 0, 9, dt);
-  camera.position.set(sx, camBaseY - camDip + sy, camBaseZ);
+  pathPos(camBaseZ, camLat() + sx, camBaseY - camDip + sy, camera.position);
 
   // the view widens a little with speed, and with a big swing
   var speedK = clamp(player.vz / RUN_SPEED, 0, 1.4);
@@ -2606,7 +2732,7 @@ function updateCamera(dt) {
 
   camLookY = damp(camLookY, player.y + 1.4, 6, dt);
   camLookZ = damp(camLookZ, player.z + 5.0 + speedK * 1.5, 8, dt);
-  camera.lookAt(0, camLookY, camLookZ);
+  camera.lookAt(pathPos(camLookZ, 0, camLookY, tmpV));
   started = true;
 
   skyMesh.position.copy(camera.position);
@@ -2614,8 +2740,8 @@ function updateCamera(dt) {
   sunGlow.position.copy(sunDisc.position);
 
   // keep the shadow frustum tight around the player
-  sun.target.position.set(0, player.y, player.z + 2);
-  sun.position.set(-12, player.y + 20, player.z + 18);
+  pathPos(player.z + 2, 0, player.y, sun.target.position);
+  sun.position.set(sun.target.position.x - 12, player.y + 20, sun.target.position.z + 16);
   sun.target.updateMatrixWorld();
 }
 
@@ -2623,7 +2749,9 @@ function syncNinja(dt) {
   // the grab offset eases out over roughly a sixth of a second
   player.visOffZ = damp(player.visOffZ, 0, 13, dt);
   player.visOffY = damp(player.visOffY, 0, 13, dt);
-  ninja.position.set(0, player.y + player.visOffY, player.z + player.visOffZ);
+  // placed on the course and turned to face along it; flips and spins are
+  // children, so they stay relative to the heading
+  placeOnPath(ninja, player.z + player.visOffZ, 0, player.y + player.visOffY);
 }
 
 // hanging ropes sway gently on their own, and follow the player when held
@@ -2720,12 +2848,10 @@ if (window.visualViewport) window.visualViewport.addEventListener("resize", resi
 // =============================================================================
 // boot: a small showcase course behind the title card
 // =============================================================================
-function boot() {
-  resize();
-  applyMute();
-  titleBest.textContent = "BEST RUN: " + best + (best === 1 ? " PODIUM" : " PODIUMS");
-
-  // a decorative course so the title screen is not empty
+// a decorative course so the title screen is not empty; rebuilt when the
+// course mode is switched so the choice shows right away
+function showDemo() {
+  clearCourses();
   var demo = generateCourse(2, 0, 0);
   courses.push(demo);
   current = demo;
@@ -2733,9 +2859,43 @@ function boot() {
   player.z = 4; player.y = 0;
   initClouds(0);
   initBalloons(0);
-  camera.position.set(0, 4.6, -8.4);
-  camLookY = 1.4; camLookZ = 9;
+  snapCamera(-8.4, 4.6, 9, 1.4);
   syncNinja(0.016);
+}
+
+function refreshTitleBest() {
+  titleBest.textContent = "BEST RUN: " + best + (best === 1 ? " PODIUM" : " PODIUMS");
+}
+
+function setMode(m) {
+  mode = m === "tower" ? "tower" : "straight";
+  storeSet("ninja.mode", mode);
+  best = loadBest();
+  refreshTitleBest();
+  var btns = document.querySelectorAll(".modeBtn");
+  for (var i = 0; i < btns.length; i++) btns[i].classList.toggle("selected", btns[i].dataset.mode === mode);
+  if (state === TITLE) showDemo();
+}
+
+(function wireModeButtons() {
+  var btns = document.querySelectorAll(".modeBtn");
+  for (var i = 0; i < btns.length; i++) {
+    (function (b) {
+      // pointerdown, so a tap never doubles as a game start
+      b.addEventListener("pointerdown", function (e) {
+        e.stopPropagation();
+        e.preventDefault();
+        setMode(b.dataset.mode);
+      }, { passive: false });
+      b.addEventListener("click", function (e) { e.stopPropagation(); });
+    })(btns[i]);
+  }
+})();
+
+function boot() {
+  resize();
+  applyMute();
+  setMode(mode);      // selects the button, shows the demo course and the best
   requestAnimationFrame(frame);
 }
 
