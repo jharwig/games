@@ -1,6 +1,6 @@
 # Games
 
-A collection of small browser games. Each game lives in its own directory and is one self-contained HTML file — no build step, no dependencies. Every push to `main` deploys all games to GitHub Pages.
+A collection of small browser games. Each game lives in its own directory — most are one self-contained HTML file; some are TypeScript apps built during deploy. Every push to `main` deploys all games to GitHub Pages.
 
 **Play:** https://jharwig.github.io/games/
 
@@ -17,6 +17,8 @@ Block is a one-button arcade game in a retro pixel-art style. You guide a small 
 - If you hit a tower or the ground, the hero and the nearby blocks explode into pixel debris, and the run ends.
 - Your best score is saved in the browser.
 
+Coins float around the towers: **bronze is worth 1**, **silver 5**, **gold 10** — the more valuable the coin, the riskier the spot it floats in. Coins are banked the moment you touch them (dying never takes them away) and are saved in the browser. Spend them in the **shop** — a SHOP button on the title and game-over screens — on new faces and body colors for the block, drawn from Arthur's designs. Your look is saved too, and the block explodes in its equipped colors.
+
 The scene is drawn on a 160×288 pixel canvas: a starry sky with a cratered moon, two layers of parallax city skyline with lit windows, and a chiptune soundtrack with a mute toggle.
 
 ### Controls
@@ -24,7 +26,7 @@ The scene is drawn on a 160×288 pixel canvas: a starry sky with a cratered moon
 - **Tap / click** — flap
 - **Space** — flap
 - **M** — mute / unmute the sound
-- Any input on the title or game-over screen starts a new run.
+- Any input on the title or game-over screen starts a new run; tap **SHOP** on those screens to buy and wear faces and colors.
 
 ## Ninja Adventure
 

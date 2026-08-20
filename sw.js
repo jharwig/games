@@ -10,8 +10,6 @@ var BUILT_PRECACHE = [];
 var PRECACHE = [
   "./",
   "./index.html",
-  "./block/",
-  "./block/index.html",
   "./ninja/",
   "./ninja/index.html",
   "./ninja/three.module.min.js",
