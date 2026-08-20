@@ -7,11 +7,12 @@ to `main` (https://jharwig.github.io/games/). The root is a PWA shell:
 ## Layout
 
 - Each game lives in its own top-level directory.
-- Simple games are a single self-contained `index.html` (ninja, beedraw).
-- Complex games may be multi-file built apps with a `package.json` (sail, block).
-  The deploy workflow (`.github/workflows/deploy.yml`) auto-builds any
+- Simple games are a single self-contained `index.html` (ninja).
+- Complex games may be multi-file built apps with a `package.json` (sail, block,
+  beedraw). The deploy workflow (`.github/workflows/deploy.yml`) auto-builds any
   top-level directory containing a `package.json` and publishes its `dist/`.
-- `sail/` and `block/` have their own `CLAUDE.md` — read it before working there.
+- `sail/`, `block/` and `beedraw/` have their own `CLAUDE.md` — read it before
+  working there.
 
 ## Adding a new game
 

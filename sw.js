@@ -13,8 +13,6 @@ var PRECACHE = [
   "./ninja/",
   "./ninja/index.html",
   "./ninja/three.module.min.js",
-  "./beedraw/",
-  "./beedraw/index.html",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",
