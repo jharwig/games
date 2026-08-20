@@ -72,7 +72,9 @@ muzzle smoke ever comes near the camera.
   in-game (mirror of `CREDITS.md`).
 - `audio.ts` — WebAudio: uses `media/sfx/*.ogg` samples when listed in the
   manifest, synthesises every sound otherwise; `play` / `loop` with pan +
-  distance.
+  distance. `gunshot.ts` — the rifle / revolver / distant-shot sounds,
+  rendered offline (pure DSP, no WebAudio) into buffers at start-up; run it
+  under Node to write a WAV and audition changes outside the game.
 - `particles.ts` — one Points pool: muzzle smoke/flash, hoof dust, impacts.
 
 ## Assets

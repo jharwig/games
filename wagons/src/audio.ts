@@ -1,9 +1,11 @@
 // audio.ts — Circle the Wagons sound.
 //
 // Two paths, one API. If `load()` found a real OGG for a sound, `play`/`loop`
-// use the decoded sample; otherwise the sound is synthesised from oscillators
-// and noise buffers. The game never has to know which — and it sounds fine
-// with no media files present at all.
+// use the decoded sample; otherwise the sound is synthesised. The gunshots
+// (rifle, revolver, a Rider's distant shot) are synthesised offline by
+// `gunshot.ts` into buffers at start-up and then played like recordings;
+// everything else is built live from oscillators and noise. The game never
+// has to know which — and it sounds fine with no media files present at all.
 //
 // Every call gets its own little chain:
 //     voice(s) -> [lowpass, when dist > 0] -> gain -> stereo pan -> master
@@ -40,6 +42,8 @@ export interface LoopHandle {
   stop(fade?: number): void;
 }
 
+import { renderShot, type ShotKind } from './gunshot';
+
 const MUTE_KEY = 'wagons.muted';
 
 const NAMES: readonly Sfx[] = [
@@ -56,6 +60,10 @@ let isMuted = readMuted();
 
 /** Decoded samples, keyed by sound name. Missing key = use the synth. */
 const samples = new Map<Sfx, AudioBuffer>();
+/** Offline-rendered gunshots: a few takes each, picked at random per shot. */
+const shots = new Map<Sfx, AudioBuffer[]>();
+const SHOT_KIND: Partial<Record<Sfx, ShotKind>> = { rifle: 'rifle', revolver: 'revolver', shot: 'far' };
+const SHOT_TAKES = 3;
 /** Lazily-built synth buffers (white noise, and the two looping beds). */
 let whiteBuf: AudioBuffer | null = null;
 let gallopBuf: AudioBuffer | null = null;
@@ -84,7 +92,29 @@ function ensure(): AudioContext | null {
   whiteBuf = ac.createBuffer(1, len, ac.sampleRate);
   const d = whiteBuf.getChannelData(0);
   for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  // Render the gunshots off the gesture that created the context; each take
+  // is ~10 ms of DSP, and the first shot is always at least a title screen away.
+  const c = ac;
+  setTimeout(() => { for (const name of Object.keys(SHOT_KIND) as Sfx[]) shotFor(c, name); }, 0);
   return ac;
+}
+
+/** A random rendered take of a gunshot, rendering the takes on first use. */
+function shotFor(c: AudioContext, name: Sfx): AudioBuffer | null {
+  const kind = SHOT_KIND[name];
+  if (!kind) return null;
+  let takes = shots.get(name);
+  if (!takes) {
+    takes = [];
+    for (let i = 0; i < SHOT_TAKES; i++) {
+      const data = renderShot(kind, c.sampleRate, i + 1);
+      const buf = c.createBuffer(1, data.length, c.sampleRate);
+      buf.copyToChannel(data, 0);
+      takes.push(buf);
+    }
+    shots.set(name, takes);
+  }
+  return takes[Math.floor(Math.random() * takes.length)];
 }
 
 function clamp(v: number, lo: number, hi: number): number {
@@ -211,29 +241,8 @@ function click(at: number, dest: AudioNode, freq: number, gain: number, dur = 0.
 
 type Voice = (at: number, dest: AudioNode, rate: number) => void;
 
-const SYNTH: Record<Sfx, Voice> = {
-  // Hard broadband crack, a chest-thump of sub, the boom rolling out, then a
-  // slapback off the coaches and the prairie echo. Loud on purpose — the bus
-  // compressor takes the peak.
-  rifle: (t, d, r) => {
-    noise({ at: t, dur: 0.012, gain: 1.8, type: 'highpass', freq: 900 * r, q: 0.5, attack: 0.0004, dest: d });
-    noise({ at: t, dur: 0.055, gain: 1.2, type: 'bandpass', freq: 2300 * r, freqTo: 500, q: 0.6, attack: 0.0005, dest: d });
-    tone({ type: 'triangle', freq: 460 * r, freqTo: 90, at: t, dur: 0.07, gain: 0.7, attack: 0.001, dest: d });
-    tone({ type: 'sine', freq: 170 * r, freqTo: 40, at: t, dur: 0.34, gain: 1.5, attack: 0.002, dest: d });
-    noise({ at: t + 0.01, dur: 0.5, gain: 0.55, type: 'lowpass', freq: 1000, freqTo: 120, dest: d });
-    noise({ at: t + 0.07, dur: 0.12, gain: 0.25, type: 'bandpass', freq: 1500 * r, freqTo: 500, q: 0.8, dest: d });
-    noise({ at: t + 0.26, dur: 0.8, gain: 0.13, type: 'lowpass', freq: 520, freqTo: 110, dest: d });
-  },
-  // Shorter and brighter than the Rifle, snappier, a little less sub.
-  revolver: (t, d, r) => {
-    noise({ at: t, dur: 0.01, gain: 1.6, type: 'highpass', freq: 1300 * r, q: 0.5, attack: 0.0004, dest: d });
-    noise({ at: t, dur: 0.045, gain: 1.0, type: 'bandpass', freq: 3000 * r, freqTo: 700, q: 0.7, attack: 0.0005, dest: d });
-    tone({ type: 'triangle', freq: 600 * r, freqTo: 120, at: t, dur: 0.05, gain: 0.6, attack: 0.001, dest: d });
-    tone({ type: 'sine', freq: 200 * r, freqTo: 48, at: t, dur: 0.22, gain: 1.1, attack: 0.002, dest: d });
-    noise({ at: t + 0.01, dur: 0.3, gain: 0.4, type: 'lowpass', freq: 1200, freqTo: 180, dest: d });
-    noise({ at: t + 0.06, dur: 0.1, gain: 0.2, type: 'bandpass', freq: 1800 * r, freqTo: 600, q: 0.8, dest: d });
-    noise({ at: t + 0.2, dur: 0.5, gain: 0.09, type: 'lowpass', freq: 600, freqTo: 120, dest: d });
-  },
+// Gunshots are not here: they come pre-rendered from gunshot.ts (see shotFor).
+const SYNTH: Partial<Record<Sfx, Voice>> = {
   // Clack-clack: two clicks 90 ms apart, bandpassed around 2.5 kHz.
   lever: (t, d, r) => {
     click(t, d, 2500 * r, 0.5);
@@ -298,13 +307,6 @@ const SYNTH: Record<Sfx, Voice> = {
     }
     tone({ type: 'square', freq: 900 * r, at: t + 0.02, dur: 0.09, gain: 0.16, attack: 0.006, filter: 3200, dest: d });
     tone({ type: 'square', freq: 1350 * r, at: t + 0.11, dur: 0.11, gain: 0.18, attack: 0.006, filter: 4000, dest: d });
-  },
-  // A Rider's pistol going off out there: crack, then a slapback off the coaches.
-  shot: (t, d, r) => {
-    noise({ at: t, dur: 0.016, gain: 0.6, type: 'bandpass', freq: 1800 * r, q: 0.9, attack: 0.0006, dest: d });
-    noise({ at: t, dur: 0.1, gain: 0.3, type: 'lowpass', freq: 2200 * r, freqTo: 500, dest: d });
-    tone({ type: 'sine', freq: 150 * r, freqTo: 60, at: t, dur: 0.12, gain: 0.25, dest: d });
-    noise({ at: t + 0.11, dur: 0.22, gain: 0.1, type: 'lowpass', freq: 1100, freqTo: 300, dest: d });
   },
   // Raid start: three notes, brass-band-on-the-plains.
   sting: (t, d, _r) => {
@@ -389,8 +391,7 @@ function bedFor(c: AudioContext, name: Sfx): AudioBuffer | null {
 
 /** Shots get a touch of pitch variance so a burst never sounds copy-pasted. */
 function variance(name: Sfx): number {
-  return (name === 'rifle' || name === 'revolver' || name === 'shot')
-    ? 0.97 + Math.random() * 0.06 : 1;
+  return name in SHOT_KIND ? 0.96 + Math.random() * 0.08 : 1;
 }
 
 function playBuffer(c: AudioContext, buf: AudioBuffer, ch: Chain, at: number,
@@ -413,9 +414,9 @@ function play(name: Sfx, opts: PlayOpts = {}): void {
   const rate = (opts.rate ?? 1) * variance(name);
   const ch = chain(c, opts);
   // 'wind' is an ambience, not a one-shot; 'gallop' can fire as a single cycle.
-  const buf = samples.get(name) ?? (name === 'gallop' ? bedFor(c, name) : null);
+  const buf = samples.get(name) ?? shotFor(c, name) ?? (name === 'gallop' ? bedFor(c, name) : null);
   if (buf) playBuffer(c, buf, ch, t, rate, false);
-  else SYNTH[name](t, ch.input, rate);
+  else SYNTH[name]?.(t, ch.input, rate);
 }
 
 function loop(name: Sfx, opts: PlayOpts = {}): LoopHandle {
