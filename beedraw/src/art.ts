@@ -2,7 +2,8 @@
 // smooth drawing helpers (gameplay art)
 // =========================================================================
 import { W, H, FX0, FY0, FX1, FY1, OUT, P, INK_HALF } from "./const";
-import type { Level, Gap } from "./level";
+import { mulberry32 } from "./util";
+import type { Level, Gap, Solid } from "./level";
 
 type Ctx = CanvasRenderingContext2D;
 
@@ -21,28 +22,76 @@ export function panel(c: Ctx, x: number, y: number, w: number, h: number): void 
   rr(c, x, y, w, h, Math.min(h / 2, 16)); c.fill();
 }
 
-export function drawMeadow(c: Ctx): void {
+// =========================================================================
+// biomes - the look re-rolls with every layout; only the palette changes,
+// every obstacle keeps its shape and its rules
+// =========================================================================
+export interface Biome {
+  name: string;
+  grassA: string; grassB: string;   // ground gradient, top -> bottom
+  glow: string;                     // "r,g,b" of the soft light patches
+  tuft: string;                     // grass tuft stroke
+  flowers: string[];                // petal colours (empty: no flowers)
+  flowerN: number;
+  rockA: string; rockB: string;
+  mountA: string; mountB: string; cap: string;
+  canopyA: string; canopyB: string; trunk: string; snowy: boolean;
+  logA: string; logB: string;
+  waterA: string; waterB: string;
+}
+
+export const BIOMES: Biome[] = [
+  { name: "meadow", grassA: "#8ed94b", grassB: "#57a82e", glow: "255,255,180", tuft: "rgba(30,90,20,0.5)",
+    flowers: ["#ff6b9d", "#ffffff", "#c78bff", "#ff9d5c"], flowerN: 12,
+    rockA: "#d8d8e2", rockB: "#8a8a9c", mountA: "#a2a2b4", mountB: "#555568", cap: "#f4f6ff",
+    canopyA: "#5cc244", canopyB: "#2c7a22", trunk: "#6e4a2c", snowy: false,
+    logA: "#a97843", logB: "#5e3e1e", waterA: "#7cc4ec", waterB: "#3577c2" },
+  { name: "autumn", grassA: "#dcb54e", grassB: "#a5742a", glow: "255,220,140", tuft: "rgba(110,70,20,0.5)",
+    flowers: ["#ff8c42", "#ffd166", "#e63946"], flowerN: 9,
+    rockA: "#cfbca6", rockB: "#7c6852", mountA: "#8f7360", mountB: "#4a372a", cap: "#ead9bb",
+    canopyA: "#f08a36", canopyB: "#a83e18", trunk: "#57391c", snowy: false,
+    logA: "#8a5a2b", logB: "#46321a", waterA: "#6aa8c8", waterB: "#2c5f8a" },
+  { name: "snow", grassA: "#f1f6ff", grassB: "#c4d5ea", glow: "255,255,255", tuft: "rgba(110,140,185,0.45)",
+    flowers: [], flowerN: 0,
+    rockA: "#ccd4e0", rockB: "#737c8c", mountA: "#8f9aaa", mountB: "#48525f", cap: "#ffffff",
+    canopyA: "#3a7a55", canopyB: "#1b4630", trunk: "#4a3626", snowy: true,
+    logA: "#7d5c3e", logB: "#43301f", waterA: "#a8dcf0", waterB: "#4a8fc8" },
+  { name: "dusk", grassA: "#8377bf", grassB: "#3d3a7a", glow: "255,200,230", tuft: "rgba(40,20,80,0.55)",
+    flowers: ["#ffd166", "#ff6b9d", "#ffffff"], flowerN: 12,
+    rockA: "#a39cc2", rockB: "#514c74", mountA: "#655d8c", mountB: "#2a2549", cap: "#dcd3f7",
+    canopyA: "#468a68", canopyB: "#21483a", trunk: "#3a2a3a", snowy: false,
+    logA: "#74506a", logB: "#3d2a3c", waterA: "#5466c8", waterB: "#1e2a70" },
+  { name: "desert", grassA: "#ebcc8e", grassB: "#c09550", glow: "255,240,200", tuft: "rgba(140,100,40,0.5)",
+    flowers: ["#e63946", "#ffd166"], flowerN: 6,
+    rockA: "#dd9c62", rockB: "#8a552a", mountA: "#bf7448", mountB: "#67381c", cap: "#f2cba2",
+    canopyA: "#7b9a42", canopyB: "#3f5f22", trunk: "#7a5a2c", snowy: false,
+    logA: "#a97843", logB: "#5e3e1e", waterA: "#5fc9c0", waterB: "#2a8a92" }
+];
+
+export function drawMeadow(c: Ctx, b: Biome, seed: number): void {
+  const r = mulberry32((seed * 747796405) | 0);
   const sky = c.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, "#8ed94b"); sky.addColorStop(1, "#57a82e");
+  sky.addColorStop(0, b.grassA); sky.addColorStop(1, b.grassB);
   c.fillStyle = sky; c.fillRect(0, 0, W, H);
   let i, x, y;
   for (i = 0; i < 9; i++) {
-    x = (i * 211) % W; y = 60 + ((i * 157) % (H - 120));
+    x = r() * W; y = 60 + r() * (H - 120);
     const rg = c.createRadialGradient(x, y, 0, x, y, 90);
-    rg.addColorStop(0, "rgba(255,255,180,0.10)"); rg.addColorStop(1, "rgba(255,255,180,0)");
+    rg.addColorStop(0, "rgba(" + b.glow + ",0.10)"); rg.addColorStop(1, "rgba(" + b.glow + ",0)");
     c.fillStyle = rg; c.beginPath(); c.arc(x, y, 90, 0, 7); c.fill();
   }
-  c.strokeStyle = "rgba(30,90,20,0.5)"; c.lineWidth = 2; c.lineCap = "round";
+  c.strokeStyle = b.tuft; c.lineWidth = 2; c.lineCap = "round";
   for (i = 0; i < 80; i++) {
-    x = 20 + ((i * 173) % (W - 40)); y = 60 + ((i * 97) % (H - 110));
+    x = 20 + r() * (W - 40); y = 60 + r() * (H - 110);
     c.beginPath();
     c.moveTo(x, y); c.quadraticCurveTo(x - 3, y - 7, x - 5, y - 10);
     c.moveTo(x, y); c.quadraticCurveTo(x + 1, y - 8, x + 3, y - 12);
     c.moveTo(x, y); c.quadraticCurveTo(x + 5, y - 6, x + 8, y - 9);
     c.stroke();
   }
-  const fc = ["#ff6b9d", "#ffffff", "#c78bff", "#ff9d5c"];
-  for (i = 0; i < 12; i++) flower(c, 40 + ((i * 199) % (W - 80)), 70 + ((i * 131) % (H - 130)), fc[i % 4]);
+  for (i = 0; i < b.flowerN; i++) {
+    flower(c, 40 + r() * (W - 80), 70 + r() * (H - 130), b.flowers[i % b.flowers.length]);
+  }
 }
 
 function flower(c: Ctx, x: number, y: number, col: string): void {
@@ -112,7 +161,7 @@ export function drawFence(c: Ctx, L: Level): void {
   }
 }
 
-export function drawPonds(c: Ctx, L: Level, t: number): void {
+export function drawPonds(c: Ctx, L: Level, t: number, b: Biome): void {
   for (let i = 0; i < L.ponds.length; i++) {
     const p = L.ponds[i];
     c.save(); c.translate(p.x, p.y);
@@ -131,7 +180,7 @@ export function drawPonds(c: Ctx, L: Level, t: number): void {
     }
     c.closePath();
     const pgr = c.createRadialGradient(0, -10, 10, 0, 0, p.r * 1.4);
-    pgr.addColorStop(0, "#7cc4ec"); pgr.addColorStop(1, "#3577c2");
+    pgr.addColorStop(0, b.waterA); pgr.addColorStop(1, b.waterB);
     c.fillStyle = pgr; c.fill();
     c.strokeStyle = OUT; c.lineWidth = 3.5; c.stroke();
     c.save(); c.clip();
@@ -148,25 +197,116 @@ export function drawPonds(c: Ctx, L: Level, t: number): void {
   }
 }
 
-export function drawRocks(c: Ctx, L: Level): void {
-  for (let i = 0; i < L.rocks.length; i++) {
-    const rk = L.rocks[i];
-    c.save(); c.translate(rk.x, rk.y); c.scale(rk.s, rk.s);
-    c.strokeStyle = OUT; c.lineWidth = 3.5 / rk.s;
-    for (let j = 0; j < rk.parts.length; j++) {
-      const sh = rk.parts[j];
-      const rg = c.createRadialGradient(sh[0] - 6, sh[1] - 8, 2, sh[0], sh[1], sh[2] + 6);
-      rg.addColorStop(0, "#d8d8e2"); rg.addColorStop(1, "#8a8a9c");
-      c.fillStyle = rg;
-      c.beginPath(); c.ellipse(sh[0], sh[1], sh[2], sh[3], 0, 0, 7); c.fill(); c.stroke();
-    }
+// =========================================================================
+// solids: rock, mountain, tree, log, honey pot. Each is drawn in its local
+// frame (scaled, rotated) so the art matches the collision ellipses exactly.
+// =========================================================================
+function drawRock(c: Ctx, sd: Solid, b: Biome): void {
+  c.strokeStyle = OUT; c.lineWidth = 3.5 / sd.s;
+  for (let j = 0; j < sd.parts.length; j++) {
+    const sh = sd.parts[j];
+    const rg = c.createRadialGradient(sh[0] - 6, sh[1] - 8, 2, sh[0], sh[1], sh[2] + 6);
+    rg.addColorStop(0, b.rockA); rg.addColorStop(1, b.rockB);
+    c.fillStyle = rg;
+    c.beginPath(); c.ellipse(sh[0], sh[1], sh[2], sh[3], 0, 0, 7); c.fill(); c.stroke();
+  }
+}
+
+function drawMountain(c: Ctx, sd: Solid, b: Biome): void {
+  // ground shadow
+  c.fillStyle = "rgba(0,0,0,0.16)";
+  for (let j = 0; j < sd.parts.length; j++) {
+    const sh = sd.parts[j];
+    c.beginPath(); c.ellipse(sh[0] + 6, sh[1] + 9, sh[2] + 2, sh[3] + 2, 0, 0, 7); c.fill();
+  }
+  c.strokeStyle = OUT; c.lineWidth = 4 / sd.s;
+  for (let j = 0; j < sd.parts.length; j++) {
+    const sh = sd.parts[j];
+    const cx = sh[0], cy = sh[1], rx = sh[2], ry = sh[3];
+    const rg = c.createRadialGradient(cx - rx * 0.3, cy - ry * 0.5, 4, cx, cy, rx * 1.1);
+    rg.addColorStop(0, b.mountA); rg.addColorStop(1, b.mountB);
+    c.fillStyle = rg;
+    c.beginPath(); c.ellipse(cx, cy, rx, ry, 0, 0, 7); c.fill(); c.stroke();
+    // a jagged ridge climbing to the peak, lit from the upper left
+    c.save();
+    c.beginPath(); c.ellipse(cx, cy, rx - 1, ry - 1, 0, 0, 7); c.clip();
+    const px = cx - rx * 0.15, py = cy - ry * 0.95;
+    c.fillStyle = "rgba(255,255,255,0.16)";
+    c.beginPath();
+    c.moveTo(cx - rx, cy + ry);
+    c.lineTo(cx - rx * 0.55, cy - ry * 0.1);
+    c.lineTo(cx - rx * 0.35, cy - ry * 0.45);
+    c.lineTo(px, py);
+    c.lineTo(cx + rx * 0.05, cy + ry);
+    c.closePath(); c.fill();
+    c.fillStyle = "rgba(0,0,0,0.22)";
+    c.beginPath();
+    c.moveTo(px, py);
+    c.lineTo(cx + rx * 0.3, cy - ry * 0.35);
+    c.lineTo(cx + rx * 0.55, cy);
+    c.lineTo(cx + rx, cy + ry);
+    c.lineTo(cx + rx * 0.05, cy + ry);
+    c.closePath(); c.fill();
+    // the cap
+    c.fillStyle = b.cap;
+    c.beginPath();
+    c.moveTo(px - rx * 0.22, py + ry * 0.34);
+    c.lineTo(px - rx * 0.12, py + ry * 0.22);
+    c.lineTo(px - rx * 0.04, py + ry * 0.3);
+    c.lineTo(px + rx * 0.06, py + ry * 0.16);
+    c.lineTo(px + rx * 0.16, py + ry * 0.3);
+    c.lineTo(px + rx * 0.26, py + ry * 0.36);
+    c.lineTo(px + rx * 0.1, py - ry * 0.3);
+    c.closePath(); c.fill();
     c.restore();
   }
 }
 
-export function drawHoney(c: Ctx, L: Level, t: number): void {
-  if (!L.honey) return;
-  c.save(); c.translate(L.honey.x, L.honey.y + Math.sin(t * 2) * 1.5);
+function drawTree(c: Ctx, sd: Solid, b: Biome): void {
+  c.fillStyle = "rgba(0,0,0,0.18)";
+  c.beginPath(); c.ellipse(4, 8, 20, 13, 0, 0, 7); c.fill();
+  c.strokeStyle = OUT; c.lineWidth = 3 / sd.s;
+  c.fillStyle = b.trunk;
+  c.beginPath(); c.arc(0, 6, 5, 0, 7); c.fill(); c.stroke();
+  const cg = c.createRadialGradient(-6, -7, 2, 0, 0, 24);
+  cg.addColorStop(0, b.canopyA); cg.addColorStop(1, b.canopyB);
+  c.fillStyle = cg;
+  c.beginPath(); c.ellipse(0, 0, 20, 17, 0, 0, 7); c.fill(); c.stroke();
+  // leafy bumps
+  c.fillStyle = "rgba(255,255,255,0.14)";
+  const k = sd.seed * 6.28;
+  for (let j = 0; j < 3; j++) {
+    c.beginPath(); c.arc(Math.cos(k + j * 2.1) * 8 - 3, Math.sin(k + j * 2.1) * 6 - 4, 5, 0, 7); c.fill();
+  }
+  if (b.snowy) {
+    c.fillStyle = "#ffffff";
+    c.beginPath(); c.ellipse(-2, -8, 12, 5, -0.2, 0, 7); c.fill();
+  }
+}
+
+function drawLog(c: Ctx, sd: Solid, b: Biome): void {
+  c.fillStyle = "rgba(0,0,0,0.18)";
+  rr(c, -50, -4, 104, 20, 9); c.fill();
+  c.strokeStyle = OUT; c.lineWidth = 3 / sd.s;
+  const lg = c.createLinearGradient(0, -9, 0, 9);
+  lg.addColorStop(0, b.logA); lg.addColorStop(1, b.logB);
+  c.fillStyle = lg;
+  rr(c, -52, -9, 104, 18, 8); c.fill(); c.stroke();
+  c.strokeStyle = "rgba(0,0,0,0.25)"; c.lineWidth = 1.6;
+  for (let j = 0; j < 4; j++) {
+    const yy = -5 + j * 3.4;
+    c.beginPath(); c.moveTo(-40 + j * 6, yy); c.lineTo(30 - j * 4, yy + 0.8); c.stroke();
+  }
+  // cut end with rings
+  c.strokeStyle = OUT; c.lineWidth = 3 / sd.s;
+  c.fillStyle = "#e2c28c";
+  c.beginPath(); c.ellipse(50, 0, 6, 9, 0, 0, 7); c.fill(); c.stroke();
+  c.strokeStyle = "rgba(90,60,20,0.6)"; c.lineWidth = 1.4;
+  c.beginPath(); c.ellipse(50, 0, 3.5, 5.5, 0, 0, 7); c.stroke();
+  c.beginPath(); c.ellipse(50, 0, 1.5, 2.5, 0, 0, 7); c.stroke();
+}
+
+function drawHoney(c: Ctx): void {
   c.strokeStyle = OUT; c.lineWidth = 3;
   c.fillStyle = "rgba(0,0,0,0.15)";
   c.beginPath(); c.ellipse(0, 26, 20, 6, 0, 0, 7); c.fill();
@@ -178,13 +318,40 @@ export function drawHoney(c: Ctx, L: Level, t: number): void {
   c.bezierCurveTo(20, 20, 24, 4, 16, -8); c.closePath(); c.fill(); c.stroke();
   c.fillStyle = "#8a5a2b"; rr(c, -14, -16, 28, 9, 4); c.fill(); c.stroke();
   c.fillStyle = "#ffdf8a";
-  c.beginPath(); c.moveTo(-8, -7); c.bezierCurveTo(-8, 2 + Math.sin(t * 3) * 2, -2, 0, -2, -7); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(-8, -7); c.bezierCurveTo(-8, 2, -2, 0, -2, -7); c.closePath(); c.fill();
   c.fillStyle = "rgba(255,255,255,0.5)";
   c.beginPath(); c.ellipse(-8, 2, 4, 7, -0.4, 0, 7); c.fill();
-  c.restore();
 }
 
-export function drawInk(c: Ctx, stroke: { x: number; y: number }[], drawing: boolean): void {
+export function drawSolids(c: Ctx, L: Level, b: Biome): void {
+  // back to front so the big things overlap naturally
+  const order = L.solids.slice().sort(function (p, q) { return p.y - q.y; });
+  for (let i = 0; i < order.length; i++) {
+    const sd = order[i];
+    c.save(); c.translate(sd.x, sd.y); c.rotate(sd.rot); c.scale(sd.s, sd.s);
+    if (sd.kind === "rock") drawRock(c, sd, b);
+    else if (sd.kind === "mountain") drawMountain(c, sd, b);
+    else if (sd.kind === "tree") drawTree(c, sd, b);
+    else if (sd.kind === "log") drawLog(c, sd, b);
+    else drawHoney(c);
+    c.restore();
+  }
+}
+
+// =========================================================================
+// the ink line / the rope
+// =========================================================================
+// While the finger is down the line is just ink. Once it has fallen it is a
+// rope: every segment is either braced (pressed against something solid or
+// the fence - it never moves) or loose, and a loose segment may be lifted.
+export interface RopeView {
+  seg: Uint8Array;        // per segment: 0 braced, 1 loose
+  lift: Float32Array;     // per segment: 0 on the ground .. 1 held up
+  fall: number;           // 0 just released (in the air) .. 1 landed
+}
+
+export function drawInk(c: Ctx, stroke: { x: number; y: number }[], drawing: boolean,
+                        rope: RopeView | null): void {
   if (stroke.length < 2) {
     if (stroke.length === 1 && drawing) {
       c.fillStyle = P.ink;
@@ -192,43 +359,109 @@ export function drawInk(c: Ctx, stroke: { x: number; y: number }[], drawing: boo
     }
     return;
   }
-  function path(): void {
-    c.beginPath();
-    c.moveTo(stroke[0].x, stroke[0].y);
-    for (let i = 1; i < stroke.length; i++) c.lineTo(stroke[i].x, stroke[i].y);
-  }
   c.lineCap = "round"; c.lineJoin = "round";
-  c.strokeStyle = "rgba(0,0,0,0.18)"; c.lineWidth = 14; path(); c.stroke();
-  c.strokeStyle = P.ink; c.lineWidth = 10; path(); c.stroke();
-  c.strokeStyle = P.inkHi; c.lineWidth = 3.5; path(); c.stroke();
-  if (drawing) {
-    const e = stroke[stroke.length - 1];
-    c.fillStyle = "#ffffff"; c.beginPath(); c.arc(e.x, e.y, 9, 0, 7); c.fill();
-    c.strokeStyle = P.ink; c.lineWidth = 3.5; c.beginPath(); c.arc(e.x, e.y, 9, 0, 7); c.stroke();
-    c.fillStyle = P.ink; c.beginPath(); c.arc(e.x, e.y, 3.5, 0, 7); c.fill();
+  if (!rope) {
+    const path = function (): void {
+      c.beginPath();
+      c.moveTo(stroke[0].x, stroke[0].y);
+      for (let i = 1; i < stroke.length; i++) c.lineTo(stroke[i].x, stroke[i].y);
+    };
+    c.strokeStyle = "rgba(0,0,0,0.18)"; c.lineWidth = 14; path(); c.stroke();
+    c.strokeStyle = P.ink; c.lineWidth = 10; path(); c.stroke();
+    c.strokeStyle = P.inkHi; c.lineWidth = 3.5; path(); c.stroke();
+    if (drawing) {
+      const e = stroke[stroke.length - 1];
+      c.fillStyle = "#ffffff"; c.beginPath(); c.arc(e.x, e.y, 9, 0, 7); c.fill();
+      c.strokeStyle = P.ink; c.lineWidth = 3.5; c.beginPath(); c.arc(e.x, e.y, 9, 0, 7); c.stroke();
+      c.fillStyle = P.ink; c.beginPath(); c.arc(e.x, e.y, 3.5, 0, 7); c.fill();
+    }
+    return;
   }
+
+  // the rope: height above the ground per point (the average of its segments)
+  const n = stroke.length;
+  const air = (1 - rope.fall) * 10;
+  const hAt = function (i: number): number {
+    const a = i > 0 ? rope.lift[i - 1] : rope.lift[0];
+    const b = i < n - 1 ? rope.lift[i] : rope.lift[n - 2];
+    return air + Math.max(a, b) * 9;
+  };
+  const kindAt = function (i: number): number {      // per point: 1 if any touching segment is loose
+    const a = i > 0 ? rope.seg[i - 1] : rope.seg[0];
+    const b = i < n - 1 ? rope.seg[i] : rope.seg[n - 2];
+    return Math.max(a, b);
+  };
+  // ground shadow of everything that is off the ground
+  c.strokeStyle = "rgba(0,0,0,0.2)"; c.lineWidth = 12;
+  c.beginPath();
+  let open = false;
+  for (let i = 0; i < n; i++) {
+    const h = hAt(i);
+    const sx = stroke[i].x + 2 + h * 0.5, sy = stroke[i].y + 3 + h * 0.4;
+    if (h < 0.3 && kindAt(i) === 0) { open = false; continue; }
+    if (!open) { c.moveTo(sx, sy); open = true; } else c.lineTo(sx, sy);
+  }
+  c.stroke();
+  // the rope body, in runs of the same kind
+  const drawRun = function (i0: number, i1: number, loose: boolean): void {
+    const body = loose ? "#3f3f92" : "#232360";
+    const hi = loose ? "#8585dc" : P.inkHi;
+    const path = function (): void {
+      c.beginPath();
+      for (let i = i0; i <= i1; i++) {
+        const h = hAt(i);
+        if (i === i0) c.moveTo(stroke[i].x, stroke[i].y - h); else c.lineTo(stroke[i].x, stroke[i].y - h);
+      }
+    };
+    c.strokeStyle = OUT; c.lineWidth = 12.5; path(); c.stroke();
+    c.strokeStyle = body; c.lineWidth = 10; path(); c.stroke();
+    c.strokeStyle = hi; c.lineWidth = 3.5; path(); c.stroke();
+    if (!loose) {
+      // anchored stretches get little stitch marks so the reveal reads
+      c.strokeStyle = "rgba(255,255,255,0.55)"; c.lineWidth = 2;
+      let acc = 0;
+      for (let i = i0 + 1; i <= i1; i++) {
+        const a = stroke[i - 1], b = stroke[i];
+        const dx = b.x - a.x, dy = b.y - a.y, len = Math.sqrt(dx * dx + dy * dy) || 1;
+        acc += len;
+        if (acc < 14) continue;
+        acc = 0;
+        const nx = -dy / len * 4, ny = dx / len * 4;
+        c.beginPath(); c.moveTo(b.x - nx, b.y - ny - hAt(i)); c.lineTo(b.x + nx, b.y + ny - hAt(i)); c.stroke();
+      }
+    }
+  };
+  let runStart = 0;
+  for (let i = 1; i < n - 1; i++) {
+    if (rope.seg[i] !== rope.seg[i - 1]) { drawRun(runStart, i, rope.seg[i - 1] === 1); runStart = i; }
+  }
+  drawRun(runStart, n - 1, rope.seg[n - 2] === 1);
 }
 
 // =========================================================================
-// cartoon bee
+// cartoon bee - heat 0..1 is how fast it is (yellow .. hot orange)
 // =========================================================================
+function mix(a: number[], b: number[], t: number): string {
+  return "rgb(" + Math.round(a[0] + (b[0] - a[0]) * t) + "," + Math.round(a[1] + (b[1] - a[1]) * t) + "," +
+    Math.round(a[2] + (b[2] - a[2]) * t) + ")";
+}
 export function drawBee(c: Ctx, x: number, y: number, s: number, flip: boolean,
-                        fast: boolean, wob: number): void {
+                        heat: number, wob: number): void {
   const flap = Math.sin(wob * 3.4) * 0.5 + 0.6;
   c.save();
   c.translate(x, y + Math.sin(wob) * 2);
   c.scale(flip ? -s : s, s);
   c.strokeStyle = OUT; c.lineWidth = 2.5 / s;
   // wings
-  c.fillStyle = fast ? "rgba(255,220,220,0.55)" : "rgba(230,245,255,0.8)";
+  c.fillStyle = heat > 0.6 ? "rgba(255,220,220,0.55)" : "rgba(230,245,255,0.8)";
   c.save(); c.translate(-2, -13); c.scale(1, flap);
   c.beginPath(); c.ellipse(0, 0, 7, 10, -0.5, 0, 7); c.fill(); c.stroke(); c.restore();
   c.save(); c.translate(7, -12); c.scale(1, flap * 0.9);
   c.beginPath(); c.ellipse(0, 0, 6, 8, 0.4, 0, 7); c.fill(); c.stroke(); c.restore();
   // body
   const bg = c.createLinearGradient(0, -10, 0, 10);
-  if (fast) { bg.addColorStop(0, "#ffb46a"); bg.addColorStop(1, "#e05a12"); }
-  else { bg.addColorStop(0, "#ffe06a"); bg.addColorStop(1, "#f0a800"); }
+  bg.addColorStop(0, mix([255, 224, 106], [255, 170, 90], heat));
+  bg.addColorStop(1, mix([240, 168, 0], [220, 80, 16], heat));
   c.fillStyle = bg;
   c.beginPath(); c.ellipse(0, 0, 15, 11, 0, 0, 7); c.fill(); c.stroke();
   c.save(); c.beginPath(); c.ellipse(0, 0, 15, 11, 0, 0, 7); c.clip();

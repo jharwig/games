@@ -46,3 +46,38 @@ export function distField(grid: Uint8Array, tx: number, ty: number): Int32Array 
   }
   return d;
 }
+
+// Multi-source BFS: distance from the nearest seed cell, and which label the
+// nearest seed carried. Seeds may sit on blocked cells (the ink itself); the
+// search only ever expands into free cells, so the field descends onto the
+// seed from the free side.
+export function distFieldMulti(grid: Uint8Array, seeds: number[], labels: number[]):
+  { d: Int32Array; lab: Int32Array } {
+  const d = new Int32Array(GW * GH);
+  const lab = new Int32Array(GW * GH);
+  let i;
+  for (i = 0; i < d.length; i++) { d[i] = INF; lab[i] = -1; }
+  const q = new Int32Array(GW * GH);
+  let qh = 0, qt = 0;
+  for (i = 0; i < seeds.length; i++) {
+    const s = seeds[i];
+    if (d[s] !== INF) continue;
+    d[s] = 0; lab[s] = labels[i]; q[qt++] = s;
+  }
+  while (qh < qt) {
+    const ci = q[qh++];
+    const cx = ci % GW, cy = (ci / GW) | 0, cd = d[ci], cl = lab[ci];
+    for (i = 0; i < NB.length; i++) {
+      const ax = cx + NB[i][0], ay = cy + NB[i][1];
+      if (ax < 0 || ay < 0 || ax >= GW || ay >= GH) continue;
+      const ai = ay * GW + ax;
+      if (grid[ai] || d[ai] !== INF) continue;
+      if (NB[i][0] && NB[i][1]) {                 // no corner cutting
+        if (grid[cy * GW + ax] && grid[ay * GW + cx]) continue;
+      }
+      d[ai] = cd + 1; lab[ai] = cl;
+      q[qt++] = ai;
+    }
+  }
+  return { d: d, lab: lab };
+}

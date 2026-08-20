@@ -174,3 +174,20 @@ export function sfxLose(): void {
   slide(330, 150, t, 0.75, "sawtooth", 0.11);
   tone(mtof(52), t + 0.1, 0.6, "triangle", 0.08);
 }
+
+// ---- the rope ----
+export function sfxFall(): void {      // the rope lands on the meadow
+  if (!audio.ctx) return;
+  const t = audio.ctx.currentTime;
+  slide(260, 110, t, 0.16, "sine", 0.09);
+}
+export function sfxLift(): void {      // a loose span comes up: a rubbery creak
+  if (!audio.ctx) return;
+  const t = audio.ctx.currentTime;
+  slide(170, 430, t, 0.24, "triangle", 0.08);
+}
+export function sfxDrop(): void {      // it falls back: a soft thud
+  if (!audio.ctx) return;
+  const t = audio.ctx.currentTime;
+  slide(220, 80, t, 0.12, "sine", 0.09);
+}

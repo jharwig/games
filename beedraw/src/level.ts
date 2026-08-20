@@ -1,23 +1,29 @@
 // =========================================================================
-// level generation (seeded by level number) + geometry tests
+// level generation (fresh layout every attempt; the numbers come from the
+// level) + geometry tests
 // =========================================================================
 import {
-  W, H, FX0, FY0, FX1, FY1, CELL, GW, GH, INF, ANIM_NODRAW, HONEY_DWELL, INK_HALF
+  W, H, FX0, FY0, FX1, FY1, CELL, GW, GH, INF, ANIM_NODRAW, INK_HALF,
+  BEE_SPEED, BEE_SPD_MIN, BEE_SPD_MAX, LIFT_FROM_LEVEL
 } from "./const";
 import { clamp, dist2, mulberry32 } from "./util";
 import { NB, cellOf, distField } from "./grid";
 
 export interface Gap { side: number; a: number; b: number }
-export interface Rock { x: number; y: number; s: number; parts: number[][] }
+export type SolidKind = "rock" | "mountain" | "tree" | "log" | "honey";
+// parts are ellipses [cx, cy, rx, ry] in the solid's local frame (scaled by
+// s, rotated by rot). Everything solid blocks the bees and the pen alike.
+export interface Solid { kind: SolidKind; x: number; y: number; s: number; rot: number; parts: number[][]; seed: number }
 export interface Pond { x: number; y: number; r: number; radii: number[] }
-export interface BeeSpawn { gap: Gap; fast: boolean; phase: number; delay: number; off: number }
+export interface BeeSpawn { gap: Gap; spd: number; phase: number; delay: number; off: number }
 export interface Level {
   level: number;
   ok: boolean;
+  seed: number;
+  biome: number;
   gaps: Gap[];
-  rocks: Rock[];
+  solids: Solid[];
   ponds: Pond[];
-  honey: { x: number; y: number } | null;
   bees: BeeSpawn[];
   ax: number;
   ay: number;
@@ -26,7 +32,18 @@ export interface Level {
   time: number;
   ink: number;
   seal: number;
+  lift: boolean;
 }
+
+export const BIOME_COUNT = 5;
+
+const SHAPES: Record<SolidKind, number[][]> = {
+  rock: [[-26, 6, 22, 16], [6, 4, 26, 20], [-6, -10, 18, 13]],
+  mountain: [[-56, 10, 54, 40], [12, -8, 62, 46], [68, 18, 46, 34]],
+  tree: [[0, 0, 20, 17]],
+  log: [[0, 0, 52, 9]],
+  honey: [[0, 4, 22, 17]]
+};
 
 // =========================================================================
 // geometry tests
@@ -46,18 +63,36 @@ export function pointInPond(L: Level, x: number, y: number, pad: number): boolea
   return false;
 }
 
-export function pointInRock(L: Level, x: number, y: number, pad: number): boolean {
-  for (let i = 0; i < L.rocks.length; i++) {
-    const rk = L.rocks[i];
-    for (let j = 0; j < rk.parts.length; j++) {
-      const sh = rk.parts[j];
-      const cx = rk.x + sh[0] * rk.s, cy = rk.y + sh[1] * rk.s;
-      const rx = sh[2] * rk.s + (pad || 0), ry = sh[3] * rk.s + (pad || 0);
-      const dx = (x - cx) / rx, dy = (y - cy) / ry;
-      if (dx * dx + dy * dy <= 1) return true;
-    }
+export function pointInOneSolid(sd: Solid, x: number, y: number, pad: number): boolean {
+  const dx0 = x - sd.x, dy0 = y - sd.y;
+  const ca = Math.cos(-sd.rot), sa = Math.sin(-sd.rot);
+  const lx = dx0 * ca - dy0 * sa, ly = dx0 * sa + dy0 * ca;
+  for (let j = 0; j < sd.parts.length; j++) {
+    const sh = sd.parts[j];
+    const cx = sh[0] * sd.s, cy = sh[1] * sd.s;
+    const rx = sh[2] * sd.s + (pad || 0), ry = sh[3] * sd.s + (pad || 0);
+    const dx = (lx - cx) / rx, dy = (ly - cy) / ry;
+    if (dx * dx + dy * dy <= 1) return true;
   }
   return false;
+}
+
+export function pointInSolid(L: Level, x: number, y: number, pad: number): boolean {
+  for (let i = 0; i < L.solids.length; i++) {
+    if (pointInOneSolid(L.solids[i], x, y, pad)) return true;
+  }
+  return false;
+}
+
+// radius of the circle that contains the whole solid
+export function solidExtent(sd: Solid): number {
+  let e = 0;
+  for (let j = 0; j < sd.parts.length; j++) {
+    const sh = sd.parts[j];
+    const d = Math.sqrt(sh[0] * sh[0] + sh[1] * sh[1]) + Math.max(sh[2], sh[3]);
+    if (d > e) e = d;
+  }
+  return e * sd.s;
 }
 
 export function inField(x: number, y: number, pad?: number): boolean {
@@ -95,7 +130,7 @@ export function gapOuter(gap: Gap, off?: number): { x: number; y: number } {
 
 // how many fence gaps at level n (up to 6, opposite sides enforced below)
 function gapCount(n: number): number {
-  if (n <= 2) return 1;
+  if (n <= 1) return 1;
   if (n <= 4) return 2;
   if (n <= 6) return 3;
   if (n <= 9) return 4;
@@ -104,11 +139,10 @@ function gapCount(n: number): number {
 }
 
 // The cheapest possible full enclosure: a ring drawn right on the edge of the
-// animal's no-draw circle. From level 3 the ink budget stays below this, so a
-// plain circle around the animal can never be closed - the line must be
-// anchored to the fence and the rocks instead.
+// animal's no-draw circle. Level 1 hands out enough ink for it; from level 2
+// the budget follows the verified seal instead. A free-floating ring is no
+// longer forbidden - it is loose everywhere, so the bees just lift it.
 export const ENC_COST = 2 * Math.PI * (ANIM_NODRAW + 34);   // ring at animal + bee + margin
-export const TIGHT_RING = 2 * Math.PI * (ANIM_NODRAW + 2);  // the cheapest ring that is legal at all
 
 // ---- solvability check -------------------------------------------------
 // The guard does not guess: it builds the same grid the bees walk on, draws a
@@ -119,7 +153,7 @@ function gridFor(Lv: Level): Uint8Array {
   for (let gy = 0; gy < GH; gy++) {
     for (let gx = 0; gx < GW; gx++) {
       const x = gx * CELL + CELL / 2, y = gy * CELL + CELL / 2;
-      arr[gy * GW + gx] = (!inField(x, y, 8) || pointInRock(Lv, x, y, 6)) ? 1 : 0;
+      arr[gy * GW + gx] = (!inField(x, y, 8) || pointInSolid(Lv, x, y, 6)) ? 1 : 0;
     }
   }
   return arr;
@@ -180,7 +214,7 @@ function sealedFor(arr: Uint8Array, Lv: Level): boolean {
 }
 
 // The cheapest verified seal: try rings of growing radius, draw only the parts
-// the player is allowed to draw (not on the fence, not on a rock, not on the
+// the player is allowed to draw (not on the fence, not on a solid, not on the
 // water) and keep the cheapest one that really shuts the bees out.
 function ringSealCost(Lv: Level): number {
   let best = INF;
@@ -192,7 +226,7 @@ function ringSealCost(Lv: Level): number {
     for (let i = 0; i < N; i++) {
       const a = i / N * Math.PI * 2;
       const x = Lv.ax + Math.cos(a) * r, y = Lv.ay + Math.sin(a) * r;
-      if (!inField(x, y, 12) || pointInRock(Lv, x, y, 4) || pointInPond(Lv, x, y, 0)) {
+      if (!inField(x, y, 12) || pointInSolid(Lv, x, y, 4) || pointInPond(Lv, x, y, 0)) {
         prevFree = false; continue;               // cannot draw here
       }
       stampInto(arr, x, y, INK_HALF + CELL);
@@ -209,14 +243,19 @@ function ringSealCost(Lv: Level): number {
 
 function fail(L: Level): Level { L.ok = false; return L; }
 
+const PEN_ROOM = 12;      // the narrowest corridor the pen can still be drawn through
+
 function tryGen(level: number, seed: number): Level {
   const r = mulberry32((seed * 2654435761) | 0);
   const n = level;
   const L: Level = {
-    level: level, ok: true, gaps: [], rocks: [], ponds: [], honey: null, bees: [],
-    ax: 0, ay: 0, wallSides: {}, mode: "", time: 0, ink: 0, seal: 0
+    level: level, ok: true, seed: seed, biome: 0, gaps: [], solids: [], ponds: [], bees: [],
+    ax: 0, ay: 0, wallSides: {}, mode: "", time: 0, ink: 0, seal: 0,
+    lift: n >= LIFT_FROM_LEVEL
   };
   let i, k, x, y, t2;
+
+  L.biome = (r() * BIOME_COUNT) | 0;
 
   // survival timer: 7s early, 12s at the plateau
   L.time = Math.round(clamp(7 + (n - 1) * 0.28, 7, 12));
@@ -225,7 +264,7 @@ function tryGen(level: number, seed: number): Level {
   // a corner or a wall gives the line something to hold on to, a rock nook
   // makes the player work for it - but a fence-hugging animal is cheap to
   // seal, so it stands well off the rails and rock nooks are the common case
-  const mode = n <= 2 ? "open" : (r() < 0.3 ? "corner" : (r() < 0.55 ? "wall" : "rocks"));
+  const mode = n <= 1 ? "open" : (r() < 0.3 ? "corner" : (r() < 0.55 ? "wall" : "rocks"));
   L.mode = mode;
   L.wallSides = {};
   if (mode === "corner") {
@@ -249,14 +288,16 @@ function tryGen(level: number, seed: number): Level {
     L.ay = clamp(L.ay, FY0 + 90, FY1 - 90);
   }
 
-  function addRock(rx: number, ry: number, s: number): void {
-    L.rocks.push({ x: rx, y: ry, s: s, parts: [[-26, 6, 22, 16], [6, 4, 26, 20], [-6, -10, 18, 13]] });
+  function addSolid(kind: SolidKind, sx: number, sy: number, s: number, rot: number): Solid {
+    const sd: Solid = { kind: kind, x: sx, y: sy, s: s, rot: rot, parts: SHAPES[kind], seed: r() };
+    L.solids.push(sd);
+    return sd;
   }
   function rockClear(rx: number, ry: number, minFromAnimal: number): boolean {
     if (dist2(rx, ry, L.ax, L.ay) < minFromAnimal * minFromAnimal) return false;
     if (rx < FX0 + 56 || rx > FX1 - 56 || ry < FY0 + 46 || ry > FY1 - 46) return false;
-    for (let m = 0; m < L.rocks.length; m++) {
-      if (dist2(rx, ry, L.rocks[m].x, L.rocks[m].y) < 92 * 92) return false;
+    for (let m = 0; m < L.solids.length; m++) {
+      if (dist2(rx, ry, L.solids[m].x, L.solids[m].y) < 92 * 92) return false;
     }
     return true;
   }
@@ -266,7 +307,7 @@ function tryGen(level: number, seed: number): Level {
   // passage the stroke cannot fit. A polar flood fill across the rock's
   // sector detects real through-passages narrower than the pen.
   function slotOK(): boolean {
-    const rk = L.rocks[L.rocks.length - 1];
+    const rk = L.solids[L.solids.length - 1];
     const dir = Math.atan2(rk.y - L.ay, rk.x - L.ax);
     const NA = 40, NR = 6;                    // annulus 47..57px, +-1.1 rad
     const free: boolean[] = [];
@@ -277,7 +318,7 @@ function tryGen(level: number, seed: number): Level {
       let blkAt = -1;
       for (let ri = 0; ri < NR; ri++) {
         const w = ANIM_NODRAW + 1 + ri * 2;
-        const blk = pointInRock(L, L.ax + ca * w, L.ay + sa * w, 4);
+        const blk = pointInSolid(L, L.ax + ca * w, L.ay + sa * w, 4);
         free[ai * NR + ri] = !blk;
         if (blk && blkAt < 0) blkAt = ri;
       }
@@ -301,21 +342,33 @@ function tryGen(level: number, seed: number): Level {
     for (let ri = 0; ri < NR; ri++) if (seen[NA * NR + ri]) return false;
     return true;
   }
-  // the same rule between the last rock and its neighbours: rocks either
-  // merge into a ridge or leave real drawing room between them
-  function rockGapOK(): boolean {
-    const rk = L.rocks[L.rocks.length - 1];
-    for (let m = 0; m < L.rocks.length - 1; m++) {
-      const o = L.rocks[m];
-      const dx = o.x - rk.x, dy = o.y - rk.y;
+  // the same rule between the last solid and its neighbours (and the ponds,
+  // which the pen cannot cross either): things either merge into a ridge or
+  // leave real drawing room between them - never a slit the pen cannot fit
+  function corridorOK(): boolean {
+    const rk = L.solids[L.solids.length - 1];
+    const ext = solidExtent(rk);
+    function runTest(ox: number, oy: number, reach: number, other: Solid | null): boolean {
+      const dx = ox - rk.x, dy = oy - rk.y;
       const dl = Math.sqrt(dx * dx + dy * dy);
-      if (dl > 150) continue;
+      if (dl > reach) return true;
       let run = 0, maxRun = 0;
       for (let s2 = 0; s2 <= dl; s2 += 2) {
-        if (pointInRock(L, rk.x + dx * s2 / dl, rk.y + dy * s2 / dl, 4)) { run = 0; continue; }
+        const px = rk.x + dx * s2 / dl, py = rk.y + dy * s2 / dl;
+        const hit = pointInOneSolid(rk, px, py, 4) || (other ? pointInOneSolid(other, px, py, 4) : false) ||
+          pointInPond(L, px, py, 2);
+        if (hit) { run = 0; continue; }
         run += 2; if (run > maxRun) maxRun = run;
       }
-      if (maxRun > 0 && maxRun < 12) return false;
+      return !(maxRun > 0 && maxRun < PEN_ROOM);
+    }
+    for (let m = 0; m < L.solids.length - 1; m++) {
+      const o = L.solids[m];
+      if (!runTest(o.x, o.y, ext + solidExtent(o) + 150, o)) return false;
+    }
+    for (let m = 0; m < L.ponds.length; m++) {
+      const o = L.ponds[m];
+      if (!runTest(o.x, o.y, ext + o.r * 1.2 + 150, null)) return false;
     }
     return true;
   }
@@ -329,20 +382,20 @@ function tryGen(level: number, seed: number): Level {
       if (ridge) {
         if (rx < FX0 + 56 || rx > FX1 - 56 || ry < FY0 + 46 || ry > FY1 - 46) continue;
         let near = false;
-        for (let m = 0; m < L.rocks.length; m++) {
-          if (dist2(rx, ry, L.rocks[m].x, L.rocks[m].y) < 56 * 56) near = true;
+        for (let m = 0; m < L.solids.length; m++) {
+          if (dist2(rx, ry, L.solids[m].x, L.solids[m].y) < 56 * 56) near = true;
         }
         if (near) continue;
       } else if (!rockClear(rx, ry, 62)) continue;
-      addRock(rx, ry, s);
-      if (!slotOK() || !rockGapOK() || pointInRock(L, L.ax, L.ay, 44)) { L.rocks.pop(); continue; }
+      addSolid("rock", rx, ry, s, 0);
+      if (!slotOK() || !corridorOK() || pointInSolid(L, L.ax, L.ay, 44)) { L.solids.pop(); continue; }
       return true;
     }
     return false;
   }
 
   // ---- anchor rocks: the posts the player ties the line to ----
-  if (n >= 3 && mode === "rocks") {
+  if (n >= 2 && mode === "rocks") {
     // a rock ridge hugging the animal: it closes most of the circle by
     // itself and leaves one opening for the player to shut with a single
     // short arc - the only affordable seal away from the fence
@@ -357,7 +410,7 @@ function tryGen(level: number, seed: number): Level {
         if (placeAnchor(ang, s, true)) break;
       }
     }
-  } else if (n >= 3) {
+  } else if (n >= 2) {
     const anchors = mode === "corner" ? 2 : 3;
     const base = r() * 6.28;
     for (k = 0; k < anchors; k++) {
@@ -366,19 +419,6 @@ function tryGen(level: number, seed: number): Level {
         const s = 0.8 + r() * 0.25;
         if (placeAnchor(ang, s, false)) break;
       }
-    }
-  }
-
-  // ---- a couple of scenery rocks further out ----
-  const nRocks = (r() * Math.min(3, 1 + n / 7)) | 0;
-  for (k = 0; k < nRocks; k++) {
-    for (t2 = 0; t2 < 16; t2++) {
-      x = FX0 + 60 + r() * (FX1 - FX0 - 120);
-      y = FY0 + 50 + r() * (FY1 - FY0 - 100);
-      if (!rockClear(x, y, 150)) continue;
-      addRock(x, y, 0.75 + r() * 0.55);
-      if (!rockGapOK()) { L.rocks.pop(); continue; }
-      break;
     }
   }
 
@@ -417,8 +457,8 @@ function tryGen(level: number, seed: number): Level {
   if (L.gaps.length < want) return fail(L);
 
   // ---- ponds: no drawing, but the bees fly straight over them ----
-  if (n >= 3) {
-    const nPonds = n >= 10 ? (r() < 0.6 ? 2 : 1) : 1;
+  if (n >= 2) {
+    const nPonds = 1 + (n >= 6 ? 1 : 0) + (n >= 14 ? 1 : 0);
     for (let pI = 0; pI < nPonds; pI++) {
       for (let t3 = 0; t3 < 26; t3++) {
         const px2 = FX0 + 90 + r() * (FX1 - FX0 - 180);
@@ -426,7 +466,10 @@ function tryGen(level: number, seed: number): Level {
         const prad = 50 + Math.min(32, n * 1.2) + r() * 18;
         if (dist2(px2, py2, L.ax, L.ay) < (prad + 96) * (prad + 96)) continue;
         let bad2 = false;
-        for (let m2 = 0; m2 < L.rocks.length; m2++) if (dist2(px2, py2, L.rocks[m2].x, L.rocks[m2].y) < (prad + 64) * (prad + 64)) bad2 = true;
+        for (let m2 = 0; m2 < L.solids.length; m2++) {
+          const e2 = solidExtent(L.solids[m2]) + prad + 40;
+          if (dist2(px2, py2, L.solids[m2].x, L.solids[m2].y) < e2 * e2) bad2 = true;
+        }
         for (let m3 = 0; m3 < L.ponds.length; m3++) if (dist2(px2, py2, L.ponds[m3].x, L.ponds[m3].y) < (prad + L.ponds[m3].r + 40) * (prad + L.ponds[m3].r + 40)) bad2 = true;
         if (bad2) continue;
         const radii = [];
@@ -437,64 +480,114 @@ function tryGen(level: number, seed: number): Level {
     }
   }
 
-  // ---- honey pot: the bees drink there first, so it is placed away from the
-  //      gaps - it pulls the swarm around to the quiet side of the animal ----
-  if (n >= 6) {
-    let mx = 0, my = 0;
-    for (i = 0; i < L.gaps.length; i++) {
-      const gi2 = gapInner(L.gaps[i]);
-      const ddx = gi2.x - L.ax, ddy = gi2.y - L.ay;
-      const dl = Math.sqrt(ddx * ddx + ddy * ddy) || 1;
-      mx += ddx / dl; my += ddy / dl;
-    }
-    const ml = Math.sqrt(mx * mx + my * my);
-    const trap = ml > 0.3 && r() < 0.75;      // most levels put the lure opposite the gaps
-    for (let t4 = 0; t4 < 34; t4++) {
-      let hx, hy;
-      if (trap) {
-        const hang = Math.atan2(-my / ml, -mx / ml) + (r() - 0.5) * 1.1;
-        const hrad = 150 + r() * 90;
-        hx = L.ax + Math.cos(hang) * hrad;
-        hy = L.ay + Math.sin(hang) * hrad;
+  // ---- clutter: the hard part of a level is where you can still draw ----
+  // Everything solid blocks the bees and the pen; what grows with the level
+  // is the count, never the size. Things keep a sensible distance from the
+  // animal (the guard's rings need room), the fence and the gap mouths, and
+  // never leave a slit between them that the pen cannot fit through.
+  // distance from a point to the nearest fence gap (the bees' doors stay open)
+  function gapDist(px: number, py: number): number {
+    let best = INF;
+    for (let gI = 0; gI < L.gaps.length; gI++) {
+      const gq = L.gaps[gI];
+      let d;
+      if (gq.side < 2) {
+        const fy = gq.side === 0 ? FY0 : FY1;
+        const cx = clamp(px, gq.a, gq.b);
+        d = Math.sqrt(dist2(px, py, cx, fy));
       } else {
-        hx = FX0 + 70 + r() * (FX1 - FX0 - 140);
-        hy = FY0 + 60 + r() * (FY1 - FY0 - 120);
+        const fx = gq.side === 2 ? FX0 : FX1;
+        const cy = clamp(py, gq.a, gq.b);
+        d = Math.sqrt(dist2(px, py, fx, cy));
       }
-      if (hx < FX0 + 46 || hx > FX1 - 46 || hy < FY0 + 44 || hy > FY1 - 44) continue;
-      if (dist2(hx, hy, L.ax, L.ay) < 130 * 130) continue;
-      if (pointInPond(L, hx, hy, 24) || pointInRock(L, hx, hy, 24)) continue;
-      L.honey = { x: hx, y: hy };
-      break;
+      if (d < best) best = d;
+    }
+    return best;
+  }
+  function solidFits(sd: Solid, minFromAnimal: number): boolean {
+    if (!inField(sd.x, sd.y, 30)) return false;
+    // boundary samples of every part: clear of the animal's ring zone, the
+    // ponds and the gaps; and either well clear of the fence or merged into
+    // it - never a slit along the rails that the bees fit through and the
+    // pen does not
+    const ca = Math.cos(sd.rot), sa = Math.sin(sd.rot);
+    let nearFence = false, mergedFence = false;
+    for (let j = 0; j < sd.parts.length; j++) {
+      const sh = sd.parts[j];
+      for (let q = 0; q < 16; q++) {
+        const a = q / 16 * Math.PI * 2;
+        const lx = (sh[0] + Math.cos(a) * sh[2]) * sd.s, ly = (sh[1] + Math.sin(a) * sh[3]) * sd.s;
+        const px = sd.x + lx * ca - ly * sa, py = sd.y + lx * sa + ly * ca;
+        if (dist2(px, py, L.ax, L.ay) < minFromAnimal * minFromAnimal) return false;
+        if (pointInPond(L, px, py, 30)) return false;
+        if (gapDist(px, py) < 48) return false;
+        if (!inField(px, py, 26)) {
+          nearFence = true;
+          if (!inField(px, py, 12)) mergedFence = true;
+        }
+      }
+    }
+    if (nearFence && !mergedFence) return false;
+    // no solid swallows another's centre (ridges may touch, not nest)
+    for (let m = 0; m < L.solids.length; m++) {
+      const o = L.solids[m];
+      if (o === sd) continue;
+      if (pointInOneSolid(sd, o.x, o.y, 10) || pointInOneSolid(o, sd.x, sd.y, 10)) return false;
+    }
+    return true;
+  }
+  function scatter(kind: SolidKind, count: number, sMin: number, sMax: number, spin: number,
+                   minFromAnimal: number, triesEach: number): void {
+    for (k = 0; k < count; k++) {
+      for (t2 = 0; t2 < triesEach; t2++) {
+        x = FX0 + 40 + r() * (FX1 - FX0 - 80);
+        y = FY0 + 36 + r() * (FY1 - FY0 - 72);
+        const s = sMin + r() * (sMax - sMin);
+        const rot = spin ? (r() - 0.5) * 2 * spin : 0;
+        const sd = addSolid(kind, x, y, s, rot);
+        if (!solidFits(sd, minFromAnimal) || !corridorOK()) { L.solids.pop(); continue; }
+        break;
+      }
     }
   }
+  if (n <= 1) {
+    scatter("rock", 1 + (r() < 0.5 ? 1 : 0), 0.75, 1.2, 0, 150, 16);
+    scatter("tree", 1, 0.9, 1.1, 0, 150, 10);
+  } else {
+    const nMount = 1 + (n >= 8 ? 1 : 0) + (n >= 16 ? 1 : 0);
+    const nLogs = Math.min(5, Math.floor((n - 1) / 3));
+    const nRocks = Math.min(10, 1 + Math.floor(n * 0.5));
+    const nTrees = Math.min(14, 2 + Math.floor(n * 0.7));
+    const nHoney = (n >= 4 ? 1 : 0) + (n >= 12 ? 1 : 0);
+    scatter("mountain", nMount, 0.8, 0.95, 0.4, 118, 40);
+    scatter("log", nLogs, 0.9, 1.2, Math.PI, 112, 24);
+    scatter("rock", nRocks, 0.75, 1.15, 0, 112, 18);
+    scatter("honey", nHoney, 1, 1, 0, 120, 18);
+    scatter("tree", nTrees, 0.85, 1.2, 0, 108, 14);
+  }
 
-  // ---- bees ----
-  const beeCount = n <= 2 ? (3 + (r() < 0.5 ? 0 : 1)) : clamp(3 + Math.round(n * 0.62), 4, 15);
-  const fastChance = n >= 6 ? clamp((n - 5) * 0.07, 0, 0.5) : 0;
+  // ---- bees: every one of them fast, each with its own speed ----
+  const beeCount = n <= 1 ? 3 : clamp(3 + Math.round(n * 0.62), 4, 15);
   for (let b = 0; b < beeCount; b++) {
     const gp = L.gaps[b % L.gaps.length];
-    L.bees.push({ gap: gp, fast: r() < fastChance, phase: r() * 6.28, delay: r() * 0.7, off: (r() - 0.5) });
+    L.bees.push({
+      gap: gp, spd: BEE_SPD_MIN + r() * (BEE_SPD_MAX - BEE_SPD_MIN),
+      phase: r() * 6.28, delay: r() * 0.7, off: (r() - 0.5)
+    });
   }
 
   // ---- the animal must stand on clear ground ----
-  if (pointInPond(L, L.ax, L.ay, 50) || pointInRock(L, L.ax, L.ay, 44)) return fail(L);
+  if (pointInPond(L, L.ax, L.ay, 50) || pointInSolid(L, L.ax, L.ay, 44)) return fail(L);
 
   // ---- the bees must be a real threat: an empty field has to be a loss ----
   const arr0 = gridFor(L);
   const dA = distField(arr0, L.ax, L.ay);
-  const dH = L.honey ? distField(arr0, L.honey.x, L.honey.y) : null;
-  const honeyCell = L.honey ? cellOf(L.honey.x, L.honey.y) : 0;
   let soonest = INF;
   for (i = 0; i < L.gaps.length; i++) {
     const gin = gapInner(L.gaps[i]);
     const gc = cellOf(gin.x, gin.y);
     if (dA[gc] >= INF) continue;
-    let travel;
-    if (dH && dH[gc] < INF && dA[honeyCell] < INF) {
-      travel = (dH[gc] + dA[honeyCell]) * CELL * 1.2 / 78 + HONEY_DWELL;
-    } else {
-      travel = dA[gc] * CELL * 1.2 / 78;
-    }
+    const travel = dA[gc] * CELL * 1.2 / (BEE_SPEED * BEE_SPD_MAX);
     if (travel < soonest) soonest = travel;
   }
   if (soonest + 0.8 > L.time) return fail(L);   // the bees could never make it
@@ -504,28 +597,26 @@ function tryGen(level: number, seed: number): Level {
   if (ringCost === 0 || ringCost === INF) { L.seal = INF; return fail(L); }
   const seal = ringCost;
   L.seal = seal;
-  if (n <= 2) {
-    // tutorial levels: enough ink to simply loop around the animal
+  if (n <= 1) {
+    // the easy level: enough ink to simply loop around the animal
     L.ink = Math.round(ENC_COST * 1.15);
   } else {
     // the budget follows the layout's verified seal cost - a comfortable
-    // margin early that tightens with the levels, always at least 12% over
-    // the seal, and always below the tightest legal ring so a circle around
-    // the animal can never be closed - the line must lean on the fence and
-    // the rocks
-    const m = clamp(1.5 - (n - 3) * 0.02, 1.24, 1.5);
-    const lo2 = seal * 1.12, hi2 = TIGHT_RING * 0.95;
-    if (lo2 > hi2) return fail(L);             // not sealable on this budget
-    if (n <= 8 && seal * m > hi2) return fail(L);  // learners get full margin
-    L.ink = Math.round(clamp(seal * m, lo2, hi2));
+    // margin early that tightens with the levels (plus a quarter on top:
+    // the rope needs slack to hug the obstacles that brace it)
+    const m = clamp(1.5 - (n - 3) * 0.02, 1.24, 1.5) * 1.25;
+    L.ink = Math.round(Math.max(seal * m, seal * 1.12));
   }
   return L;
 }
 
+// a fresh layout every call: the level number sets the numbers, the seed
+// sets the shape
 export function genLevel(level: number): Level {
+  const base = (Math.random() * 2147483647) | 0;
   let attempt = 0, L: Level | null = null, fallback: Level | null = null;
   while (attempt < 48) {
-    L = tryGen(level, attempt === 0 ? level : (level * 31 + attempt) | 0);
+    L = tryGen(level, (base + attempt * 7919) | 0);
     if (L.ok) return L;
     // keep the closest miss in case no seed passes the guard
     if (L.gaps.length && L.seal > 0 && L.seal < INF &&
@@ -535,7 +626,7 @@ export function genLevel(level: number): Level {
   // last resort: play the cheapest layout we saw, with just enough ink to seal
   if (fallback) {
     L = fallback;
-    L.ink = Math.round(Math.min(TIGHT_RING * 0.96, Math.max(ENC_COST * 0.58, fallback.seal * 1.12)));
+    L.ink = Math.round(Math.max(ENC_COST * 0.58, fallback.seal * 1.12) * 1.25);
     L.ok = true;
   }
   return L!;

@@ -65,14 +65,16 @@ Pick who you play as on the title screen (or at any podium): **Gemma, Arthur, An
 
 **Play:** https://jharwig.github.io/games/beedraw/
 
-Bee Draw is a puzzle game about one line. A swarm of bees tries to reach the animal you chose — a dog, a cat, a cow, a chicken, or a horse. You draw one line of ink to block them. When you lift your finger, the bees are released and they fly.
+Bee Draw is a puzzle game about one line. A swarm of bees tries to reach the animal you chose — a dog, a cat, a cow, a chicken, or a horse. You draw one line of ink to block them. When you lift your finger, the line falls onto the meadow as a rope and the bees are released.
 
-- Keep the animal safe for 7 seconds to win the level.
+- Keep the animal safe until the timer runs out to win the level.
+- The bees are fast and smart. Wherever your rope lies loose on the grass, a bee can crawl under it and lift it up — and its friends slip through underneath. Only rope pressed right against a rock, a mountain, a tree, a log, a honey pot or the fence is braced and cannot be lifted. Think about where you draw.
 - You have a limited amount of ink, so each line must count — the budget is
-  tuned to each level's layout, and it gets tighter as you climb.
+  tuned to each level's layout.
 - Made a bad line? Draw backwards along it to erase it and get the ink back
   (as long as your finger stays down).
-- The levels are endless and randomly generated from a seed. Each level is more difficult than the one before: more bees, less ink, ponds where you cannot draw, honey pots that lure the bees away, and fast bees. Sometimes the animal shelters by the fence, sometimes in a nook of boulders out in the open.
+- Level 1 is easy (the line is a plain wall). From level 2 the levels are extremely hard and get harder: more and more obstacles — boulders, mountains, trees, fallen logs, honey pots, and ponds that you cannot draw on but the bees fly straight over.
+- Every try is different: a new layout and a new look (meadow, autumn, snow, dusk, desert) each time you play a level.
 - Your progress is saved automatically in the browser.
 
 ### Controls
