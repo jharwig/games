@@ -6,6 +6,7 @@ export function createInput(): InputState {
     right: false,
     up: false,
     down: false,
+    moveScale: 1,
     pumpPressed: false,
     throwPressed: false,
     mutePressed: false,

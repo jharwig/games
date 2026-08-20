@@ -270,6 +270,9 @@ export interface InputState {
   right: boolean;
   up: boolean;
   down: boolean;
+  /** Run speed fraction (0..1] for the held direction — the virtual joystick
+   *  tilts it (small tilt = walk); the keyboard always reports 1. */
+  moveScale: number;
   /** Edge-triggered (true for one frame): main.ts clears after each frame. */
   pumpPressed: boolean;
   throwPressed: boolean;
@@ -367,6 +370,9 @@ export interface ToolsApi {
   readonly heldInHand: boolean;
   /** Throw/use input: returns true if the press did something. */
   useHeld(): boolean;
+  /** Nearest ground pickup within `radius` of `from` (for the kid's head to
+   *  glance at). The returned vector is reused scratch — copy, don't keep. */
+  nearestPickup(from: THREE.Vector3, radius: number): THREE.Vector3 | null;
   /** Re-scatter pickups for a new Run. */
   reset(): void;
   update(dt: number): void;

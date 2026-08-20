@@ -606,13 +606,14 @@ export function createUi(ctx: GameCtx): UiApi {
 
   const input = ctx.input;
 
-  // Floating virtual joystick in the lower-left zone. Digital 8-way: the
-  // stick vector maps onto the same left/right/up/down booleans the keyboard
-  // sets, so gameplay feel is unchanged. A direction is active when its
-  // normalized component is >= COMP_ON, which gives cardinals 60° sectors and
-  // diagonals 30°. Bail (swinging) and zip (Lookout) fire on a *fresh*
-  // left/right press downstream, so entering a horizontal sector in those
-  // states takes a deliberate tilt (ENTER_COMMIT).
+  // Floating virtual joystick in the lower-left zone. Digital 8-way for
+  // direction: the stick vector maps onto the same left/right/up/down
+  // booleans the keyboard sets. A direction is active when its normalized
+  // component is >= COMP_ON, which gives cardinals 60° sectors and diagonals
+  // 30°. Bail (swinging) and zip (Lookout) fire on a *fresh* left/right press
+  // downstream, so entering a horizontal sector in those states takes a
+  // deliberate tilt (ENTER_COMMIT). The tilt magnitude also sets
+  // input.moveScale so a light touch walks and a full tilt runs.
   const STICK_BASE = 120; // ring diameter, matches .pots-stick CSS
   const STICK_R = 44; // px of nub travel
   const ENTER = 0.35; // magnitude (fraction of STICK_R) to press a direction
@@ -620,6 +621,8 @@ export function createUi(ctx: GameCtx): UiApi {
   const RELEASE = 0.25; // magnitude below which a held direction lets go
   const COMP_ON = 0.5; // normalized component to enter a sector
   const COMP_OFF = 0.4; // ...and to stay in it (hysteresis)
+  const WALK_SCALE = 0.45; // slowest the stick goes (at ENTER magnitude)
+  const RUN_AT = 0.85; // magnitude for full run speed
 
   const zone = document.createElement('div');
   zone.className = 'pots-zone clickable';
@@ -643,6 +646,7 @@ export function createUi(ctx: GameCtx): UiApi {
     stick.style.top = '';
     nub.style.transform = '';
     input.left = input.right = input.up = input.down = false;
+    input.moveScale = 1;
   }
 
   function moveStick(e: PointerEvent): void {
@@ -656,6 +660,7 @@ export function createUi(ctx: GameCtx): UiApi {
       `translate(calc(-50% + ${nx * reach}px), calc(-50% + ${ny * reach}px))`;
 
     const m = reach / STICK_R;
+    input.moveScale = Math.min(1, Math.max(WALK_SCALE, (m - ENTER) / (RUN_AT - ENTER)));
     const p = ctx.player;
     const commit = p && (p.mode === 'swinging' || p.atLookout);
     const comps = { left: -nx, right: nx, up: -ny, down: ny };

@@ -48,7 +48,24 @@ const SHOULDER_HALF = 0.16;
 const GRAVITY = 9.8;
 const RUN_SPEED_X = 6;
 const RUN_SPEED_Z = 4;
+// Ground speed ramps rather than snapping: `runFrac` (0..1 of the wanted
+// speed) climbs at RUN_ACCEL per second from a standing start (~0.35 s to a
+// full run) and drops at RUN_DECEL when the stick is let go. A hard turn
+// (more than ~100°) plants the feet and restarts from RUN_TURN_KEEP.
+const RUN_ACCEL = 2.8;
+const RUN_DECEL = 7;
+const RUN_TURN_KEEP = 0.35;
 const CLIMB_SPEED = 2;
+
+// Head look-at: glance at a Tool / log within LOOK_ITEM_RADIUS, otherwise keep
+// an eye on the Ship. The neck turns at most LOOK_YAW_MAX; a target further
+// round than LOOK_BEHIND_IN fades out and is ignored past LOOK_BEHIND_OUT.
+const LOOK_ITEM_RADIUS = 4.5;
+const LOOK_YAW_MAX = 1.0;
+const LOOK_PITCH_MIN = -0.5;
+const LOOK_PITCH_MAX = 0.35;
+const LOOK_BEHIND_IN = 1.6;
+const LOOK_BEHIND_OUT = 2.2;
 // world.ts scales pump impulses by 0.55 internally; 1.0 here means ~4-5
 // presses take the swing from rest to the amplitude cap.
 const PUMP_STRENGTH = 1.0;
@@ -188,6 +205,7 @@ function buildRig(kind: CharacterKind, carryAnchor: THREE.Object3D): Rig {
 
   const head = new THREE.Group();
   head.position.y = HEAD_Y;
+  head.rotation.order = 'YXZ'; // look-at yaw first, then nod/pitch
   body.add(head);
 
   const headGeo = new THREE.SphereGeometry(HEAD_R, 10, 8);
@@ -387,6 +405,18 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
 
   let facing = 0; // yaw; model forward is -Z
   let runPhase = 0;
+  let runFrac = 0; // 0 standing .. 1 full run (the ramp, see RUN_ACCEL)
+  let runDirX = 0; // last wanted run direction, island frame (mx, mz)
+  let runDirZ = 0;
+  let runScale = 1; // input.moveScale latched while moving (walk vs run)
+  let gait = 0; // animation blend: 0 still, ~0.4 walk, 1 run
+  let runBob = 0; // body bounce from the stride, metres
+
+  // Head look-at (damped), in the body frame. lookYaw > 0 turns left.
+  let lookYaw = 0;
+  let lookPitch = 0;
+  const lookTarget = new THREE.Vector3();
+  const lookQuat = new THREE.Quaternion();
   let climbHeight = 0;
   let climbPhase = 0;
   let lookoutEmitted = false;
@@ -536,6 +566,8 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     const set = ctx.world?.swingsets?.[setIndex];
     const swing = firstIntactSwing(setIndex);
     vel.set(0, 0, 0);
+    runFrac = 0;
+    runDirX = runDirZ = 0;
     tumbling = false;
     tumbleSpin.set(0, 0, 0);
     stunTimer = 0;
@@ -619,6 +651,7 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   function land(): void {
     position.y = Math.max(groundY(position.x, position.z), WADE_MIN);
     vel.set(0, 0, 0);
+    runFrac = 0;
     mode = 'ground';
     crouchTimer = 0.25;
     if (tumbling) {
@@ -731,10 +764,12 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     if (stunTimer > 0) {
       stunTimer -= dt;
       vel.set(0, 0, 0);
+      runFrac = 0;
       return;
     }
     if (!active) {
       vel.set(0, 0, 0);
+      runFrac = 0;
       return;
     }
 
@@ -751,11 +786,33 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       }
     }
 
+    // Ramp: build speed toward the wanted direction, bleed it off when the
+    // stick is released. A hard turn plants the feet first.
+    const moving = mx !== 0 || mz !== 0;
+    if (moving) {
+      if (runDirX !== 0 || runDirZ !== 0) {
+        const dot = (mx * runDirX + mz * runDirZ) /
+          (Math.hypot(mx, mz) * Math.hypot(runDirX, runDirZ));
+        if (dot < -0.2) runFrac = Math.min(runFrac, RUN_TURN_KEEP);
+      }
+      runDirX = mx;
+      runDirZ = mz;
+      // The stick's tilt caps the speed: light touch = walk. Latched here so
+      // the coast-down keeps the walking pace after the stick lets go.
+      runScale = inp.moveScale;
+      runFrac = Math.min(1, runFrac + RUN_ACCEL * dt);
+    } else {
+      runFrac = Math.max(0, runFrac - RUN_DECEL * dt);
+      if (runFrac === 0) runDirX = runDirZ = 0;
+    }
     // mx runs along the island's screen-right axis, mz away from the Ship.
+    const dx = runDirX;
+    const dz = runDirZ;
+    const sp = runFrac * runScale;
     vel.set(
-      frameR.x * mx * RUN_SPEED_X - frameF.x * mz * RUN_SPEED_Z,
+      (frameR.x * dx * RUN_SPEED_X - frameF.x * dz * RUN_SPEED_Z) * sp,
       0,
-      frameR.z * mx * RUN_SPEED_X - frameF.z * mz * RUN_SPEED_Z,
+      (frameR.z * dx * RUN_SPEED_X - frameF.z * dz * RUN_SPEED_Z) * sp,
     );
     // Soft shoreline: the kid can wade a step or two but never deeper —
     // each axis moves only toward ground above the wade line (or uphill,
@@ -771,10 +828,13 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     else vel.z = 0;
     position.y = groundY(position.x, position.z);
 
-    if (mx !== 0 || mz !== 0) {
+    // Face the run direction (the ramp-down coasts straight, so keep facing
+    // while the speed bleeds off too) and step the stride with ground speed.
+    const speed = Math.hypot(vel.x, vel.z);
+    if (speed > 0.05) {
       const want = Math.atan2(-vel.x, -vel.z);
       facing = shortestTurn(facing, want, dt);
-      runPhase += dt * (Math.hypot(vel.x, vel.z) / 0.55) * 2;
+      runPhase += dt * (speed / 0.55) * 2;
     } else {
       runPhase = damp(runPhase % (Math.PI * 2), 0, 6, dt);
     }
@@ -917,6 +977,11 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     }
   }
 
+  function smoothstep(lo: number, hi: number, v: number): number {
+    const t = clamp((v - lo) / (hi - lo), 0, 1);
+    return t * t * (3 - 2 * t);
+  }
+
   function shortestTurn(from: number, to: number, dt: number): number {
     let delta = to - from;
     while (delta > Math.PI) delta -= Math.PI * 2;
@@ -974,32 +1039,45 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
   }
 
   function poseGround(): void {
+    // Gait follows the ramp (what the kid is trying to do), stride cadence
+    // follows ground speed (see updateGround). `g` fades the stride in from a
+    // standstill, `run` blends the easy walk into the pumping run.
     const speed = Math.hypot(vel.x, vel.z);
-    const amp = clamp(speed / RUN_SPEED_X, 0, 1);
+    gait = speed > 0.05 ? clamp(runFrac * runScale, 0, 1) : 0;
+    const g = clamp(gait / 0.3, 0, 1);
+    const run = smoothstep(0.3, 1, gait);
     const s = Math.sin(runPhase);
     const c = Math.cos(runPhase);
     const crouch = crouchTimer > 0 ? crouchTimer / 0.25 : 0;
     const stun = stunTimer > 0 ? 1 : 0;
     // Hips scissor; each knee folds while its leg swings through (hip moving
-    // forward, cos > 0 for the left leg) and is straight during stance.
-    target.hipL = s * 0.85 * amp + crouch * 0.5 + stun * 0.2;
-    target.hipR = -s * 0.85 * amp + crouch * 0.5 + stun * 0.2;
-    target.kneeL = -(0.12 + Math.max(0, c) * 0.95) * amp - crouch * 1.0 - stun * 0.5;
-    target.kneeR = -(0.12 + Math.max(0, -c) * 0.95) * amp - crouch * 1.0 - stun * 0.5;
+    // forward, cos > 0 for the left leg) and is straight during stance. A
+    // walk keeps the knees low and the stride short; a run lifts them high.
+    const hipAmp = (0.45 + 0.4 * run) * g;
+    const kneeLift = (0.4 + 0.55 * run) * g;
+    target.hipL = s * hipAmp + crouch * 0.5 + stun * 0.2;
+    target.hipR = -s * hipAmp + crouch * 0.5 + stun * 0.2;
+    target.kneeL = -(0.1 * g + Math.max(0, c) * kneeLift) - crouch * 1.0 - stun * 0.5;
+    target.kneeR = -(0.1 * g + Math.max(0, -c) * kneeLift) - crouch * 1.0 - stun * 0.5;
     target.legSpread = 0.07;
-    target.shoulderL = -s * 0.7 * amp - stun * 0.4;
-    target.shoulderR = s * 0.7 * amp - stun * 0.4;
-    target.shoulderSpread = 0.12 + amp * 0.05;
-    target.elbowL = 0.45 + amp * 0.5;
-    target.elbowR = 0.45 + amp * 0.5;
+    // Arms hang and swing loosely on a walk, pump bent at the elbow on a run.
+    const armAmp = (0.3 + 0.45 * run) * g;
+    target.shoulderL = -s * armAmp - stun * 0.4;
+    target.shoulderR = s * armAmp - stun * 0.4;
+    target.shoulderSpread = 0.12 + run * 0.05;
+    target.elbowL = 0.35 + (0.15 + 0.5 * run) * g;
+    target.elbowR = 0.35 + (0.15 + 0.5 * run) * g;
     if (ctx.tools?.heldInHand) {
       // Carry arm: hold the Tool up in front instead of pumping it. Skipped
       // while the Hammer is out on its boomerang flight — the hand is empty.
       target.shoulderR = 0.55;
       target.elbowR = 1.0;
     }
-    target.lean = -amp * 0.18 - crouch * 0.25 + stun * 0.3;
-    target.headPitch = -amp * 0.05;
+    // Lean into the run; the walk stays upright.
+    target.lean = -(0.03 + 0.16 * run) * g - crouch * 0.25 + stun * 0.3;
+    target.headPitch = -run * 0.05;
+    // Stride bounce: two beats per cycle (one per footfall).
+    runBob = Math.abs(s) * (0.008 + 0.03 * run) * g;
   }
 
   function poseClimbing(): void {
@@ -1095,11 +1173,74 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
       rig.root.rotation.set(ridingSwing.angle * 0.85, facing, 0);
     } else {
       rig.root.position.copy(position);
-      rig.body.position.y = 0;
+      // Stride bounce only while on foot (a landing starts from the crouch).
+      if (mode !== 'ground') runBob = 0;
+      rig.body.position.y = runBob;
       if (!(mode === 'airborne' && tumbling)) {
         rig.root.rotation.set(0, facing, 0);
       }
     }
+  }
+
+  // --- head look-at --------------------------------------------------------
+  //
+  // Runs after syncRigTransform so the body frame is this frame's. The head
+  // glances at a nearby Tool / log, otherwise watches the Ship — unless that
+  // would mean looking behind, in which case it faces forward. Applied on
+  // top of the damped pose (rotation order 'YXZ': yaw, then nod).
+
+  function pickLookTarget(): boolean {
+    if (mode === 'climbing' || (mode === 'airborne' && tumbling) || stunTimer > 0) return false;
+    if (mode === 'ground') {
+      const pickup = ctx.tools?.nearestPickup(position, LOOK_ITEM_RADIUS);
+      let best: THREE.Vector3 | null = pickup ? tmpC.copy(pickup) : null;
+      let bestD = pickup ? pickup.distanceToSquared(position) : LOOK_ITEM_RADIUS * LOOK_ITEM_RADIUS;
+      // A felled Tree waiting to be carried counts as an item too.
+      const trees = ctx.world?.trees;
+      if (trees) {
+        for (const t of trees) {
+          if (t.state !== 'fallen') continue;
+          const dx = t.position.x - position.x;
+          const dz = t.position.z - position.z;
+          const d = dx * dx + dz * dz;
+          if (d < bestD) {
+            bestD = d;
+            best = tmpC.set(t.position.x, t.position.y + 0.3, t.position.z);
+          }
+        }
+      }
+      if (best) {
+        lookTarget.copy(best);
+        return true;
+      }
+    }
+    if (ctx.ship && !ctx.ship.sunk) {
+      lookTarget.copy(ctx.ship.aimPoint);
+      return true;
+    }
+    return false;
+  }
+
+  function updateLook(dt: number): void {
+    let wantYaw = 0;
+    let wantPitch = 0;
+    if (pickLookTarget()) {
+      // Target direction in the body frame (root yaw / lean / swing tilt).
+      rig.head.getWorldPosition(tmpA);
+      tmpA.subVectors(lookTarget, tmpA);
+      lookQuat.copy(rig.root.quaternion).invert();
+      tmpA.applyQuaternion(lookQuat);
+      const yaw = Math.atan2(-tmpA.x, -tmpA.z);
+      const pitch = Math.atan2(tmpA.y, Math.hypot(tmpA.x, tmpA.z));
+      // Completely behind: give up and face forward.
+      const w = 1 - smoothstep(LOOK_BEHIND_IN, LOOK_BEHIND_OUT, Math.abs(yaw));
+      wantYaw = clamp(yaw, -LOOK_YAW_MAX, LOOK_YAW_MAX) * w;
+      wantPitch = clamp(pitch, LOOK_PITCH_MIN, LOOK_PITCH_MAX) * w;
+    }
+    lookYaw = damp(lookYaw, wantYaw, 5, dt);
+    lookPitch = damp(lookPitch, wantPitch, 5, dt);
+    rig.head.rotation.y = lookYaw;
+    rig.head.rotation.x += lookPitch;
   }
 
   // --- camera --------------------------------------------------------------
@@ -1401,6 +1542,7 @@ export function createPlayer(ctx: GameCtx): PlayerApi {
     }
     applyPose(dt);
     syncRigTransform();
+    updateLook(dt);
     updateSetIndex(active);
     updateRopes(dt);
     updateCamera(dt);

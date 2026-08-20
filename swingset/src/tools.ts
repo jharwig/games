@@ -59,6 +59,7 @@ const TOOL_KINDS: ToolKind[] = ['hammer', 'wrench', 'chainsaw', 'magnet'];
 
 const _v1 = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _glance = new THREE.Vector3(); // nearestPickup() result scratch
 const _v3 = new THREE.Vector3();
 const _v4 = new THREE.Vector3();
 
@@ -544,6 +545,23 @@ export function createTools(ctx: GameCtx): ToolsApi {
     }
   }
 
+  /** Nearest ground pickup (tree-top ones are out of reach) within radius. */
+  function nearestPickup(from: THREE.Vector3, radius: number): THREE.Vector3 | null {
+    let best: Pickup | null = null;
+    let bestD = radius * radius;
+    for (const p of pickups) {
+      if (p.tree) continue;
+      const dx = p.basePos.x - from.x;
+      const dz = p.basePos.z - from.z;
+      const d = dx * dx + dz * dz;
+      if (d < bestD) {
+        bestD = d;
+        best = p;
+      }
+    }
+    return best ? _glance.copy(best.mesh.position) : null;
+  }
+
   /** Walking over a fallen Tree picks it up as a throwable log. */
   function updateLogPickup(): void {
     if (hammerInFlight || held === 'log' || held === 'cannonball') return;
@@ -815,6 +833,7 @@ export function createTools(ctx: GameCtx): ToolsApi {
       return held !== null && heldMesh !== null && heldMesh.visible;
     },
     useHeld,
+    nearestPickup,
     reset,
     update,
   };
