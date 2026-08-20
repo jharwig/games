@@ -22,6 +22,7 @@ export interface Level {
   ax: number;
   ay: number;
   wallSides: Record<number, 1 | undefined>;
+  mode: string;
   time: number;
   ink: number;
   seal: number;
@@ -213,7 +214,7 @@ function tryGen(level: number, seed: number): Level {
   const n = level;
   const L: Level = {
     level: level, ok: true, gaps: [], rocks: [], ponds: [], honey: null, bees: [],
-    ax: 0, ay: 0, wallSides: {}, time: 0, ink: 0, seal: 0
+    ax: 0, ay: 0, wallSides: {}, mode: "", time: 0, ink: 0, seal: 0
   };
   let i, k, x, y, t2;
 
@@ -221,21 +222,21 @@ function tryGen(level: number, seed: number): Level {
   L.time = Math.round(clamp(7 + (n - 1) * 0.28, 7, 12));
 
   // ---- where the animal stands ----
-  // from level 3 it hugs a wall or a corner, so the fence can carry part of
-  // the seal - a free-standing animal would need a full (unaffordable) ring
-  // where the animal stands: a corner or a wall gives the line something to
-  // hold on to, a rock nook makes the player work for it
-  const mode = n <= 2 ? "open" : (r() < 0.55 ? "corner" : (r() < 0.78 ? "wall" : "rocks"));
+  // a corner or a wall gives the line something to hold on to, a rock nook
+  // makes the player work for it - but a fence-hugging animal is cheap to
+  // seal, so it stands well off the rails and rock nooks are the common case
+  const mode = n <= 2 ? "open" : (r() < 0.3 ? "corner" : (r() < 0.55 ? "wall" : "rocks"));
+  L.mode = mode;
   L.wallSides = {};
   if (mode === "corner") {
     const cx = r() < 0.5 ? FX0 : FX1, cy = r() < 0.5 ? FY0 : FY1;
-    L.ax = cx === FX0 ? cx + 54 + r() * 10 : cx - 54 - r() * 10;
-    L.ay = cy === FY0 ? cy + 54 + r() * 10 : cy - 54 - r() * 10;
+    L.ax = cx === FX0 ? cx + 58 + r() * 14 : cx - 58 - r() * 14;
+    L.ay = cy === FY0 ? cy + 58 + r() * 14 : cy - 58 - r() * 14;
     L.wallSides[cx === FX0 ? 2 : 3] = 1;
     L.wallSides[cy === FY0 ? 0 : 1] = 1;
   } else if (mode === "wall") {
     const side = (r() * 4) | 0;
-    const d = 54 + r() * 10;
+    const d = 54 + r() * 12;
     L.wallSides[side] = 1;
     if (side === 0) { L.ay = FY0 + d; L.ax = FX0 + 120 + r() * (FX1 - FX0 - 240); }
     else if (side === 1) { L.ay = FY1 - d; L.ax = FX0 + 120 + r() * (FX1 - FX0 - 240); }
@@ -259,38 +260,111 @@ function tryGen(level: number, seed: number): Level {
     }
     return true;
   }
-  // the last placed rock must either overlap the animal's no-draw circle
-  // (the line simply ties to it) or leave a corridor wide enough to draw
-  // through - never a visible slot the stroke cannot fit
+  // the last placed rock must either seal against the animal's no-draw
+  // circle (the line simply ties to it - dead-end pockets at its shoulders
+  // are fine) or leave a corridor wide enough to draw through: never a
+  // passage the stroke cannot fit. A polar flood fill across the rock's
+  // sector detects real through-passages narrower than the pen.
   function slotOK(): boolean {
     const rk = L.rocks[L.rocks.length - 1];
     const dir = Math.atan2(rk.y - L.ay, rk.x - L.ax);
-    for (let a = -1.1; a <= 1.1; a += 0.1) {
-      const ca = Math.cos(dir + a), sa = Math.sin(dir + a);
-      for (let w = 2; w < 16; w += 2) {
-        if (pointInRock(L, L.ax + ca * (ANIM_NODRAW + w), L.ay + sa * (ANIM_NODRAW + w), 4)) {
-          if (!pointInRock(L, L.ax + ca * (ANIM_NODRAW + 1), L.ay + sa * (ANIM_NODRAW + 1), 4)) return false;
-          break;
-        }
+    const NA = 40, NR = 6;                    // annulus 47..57px, +-1.1 rad
+    const free: boolean[] = [];
+    let tight = false;
+    for (let ai = 0; ai <= NA; ai++) {
+      const a = dir - 1.1 + (2.2 * ai) / NA;
+      const ca = Math.cos(a), sa = Math.sin(a);
+      let blkAt = -1;
+      for (let ri = 0; ri < NR; ri++) {
+        const w = ANIM_NODRAW + 1 + ri * 2;
+        const blk = pointInRock(L, L.ax + ca * w, L.ay + sa * w, 4);
+        free[ai * NR + ri] = !blk;
+        if (blk && blkAt < 0) blkAt = ri;
       }
+      if (blkAt > 0) tight = true;            // free space, then rock: narrow
+    }
+    if (!tight) return true;                  // hugging or wide everywhere
+    // narrow somewhere - reject only if the annulus can be crossed
+    const seen: boolean[] = [];
+    const stack: number[] = [];
+    for (let ri = 0; ri < NR; ri++) if (free[ri]) { seen[ri] = true; stack.push(ri); }
+    while (stack.length) {
+      const c = stack.pop()!;
+      const ri = c % NR;
+      const nbs = [c - NR, c + NR, ri > 0 ? c - 1 : -1, ri < NR - 1 ? c + 1 : -1];
+      for (let j = 0; j < 4; j++) {
+        const nb = nbs[j];
+        if (nb < 0 || nb >= (NA + 1) * NR || seen[nb] || !free[nb]) continue;
+        seen[nb] = true; stack.push(nb);
+      }
+    }
+    for (let ri = 0; ri < NR; ri++) if (seen[NA * NR + ri]) return false;
+    return true;
+  }
+  // the same rule between the last rock and its neighbours: rocks either
+  // merge into a ridge or leave real drawing room between them
+  function rockGapOK(): boolean {
+    const rk = L.rocks[L.rocks.length - 1];
+    for (let m = 0; m < L.rocks.length - 1; m++) {
+      const o = L.rocks[m];
+      const dx = o.x - rk.x, dy = o.y - rk.y;
+      const dl = Math.sqrt(dx * dx + dy * dy);
+      if (dl > 150) continue;
+      let run = 0, maxRun = 0;
+      for (let s2 = 0; s2 <= dl; s2 += 2) {
+        if (pointInRock(L, rk.x + dx * s2 / dl, rk.y + dy * s2 / dl, 4)) { run = 0; continue; }
+        run += 2; if (run > maxRun) maxRun = run;
+      }
+      if (maxRun > 0 && maxRun < 12) return false;
     }
     return true;
   }
 
+  // try radii from the inside out and keep the first legal spot - anchors
+  // want to hug the no-draw circle so the line can tie to them cheaply
+  function placeAnchor(ang: number, s: number, ridge: boolean): boolean {
+    for (let rad = 62; rad <= 98; rad += 4) {
+      const rx = L.ax + Math.cos(ang) * rad;
+      const ry = L.ay + Math.sin(ang) * rad;
+      if (ridge) {
+        if (rx < FX0 + 56 || rx > FX1 - 56 || ry < FY0 + 46 || ry > FY1 - 46) continue;
+        let near = false;
+        for (let m = 0; m < L.rocks.length; m++) {
+          if (dist2(rx, ry, L.rocks[m].x, L.rocks[m].y) < 56 * 56) near = true;
+        }
+        if (near) continue;
+      } else if (!rockClear(rx, ry, 62)) continue;
+      addRock(rx, ry, s);
+      if (!slotOK() || !rockGapOK() || pointInRock(L, L.ax, L.ay, 44)) { L.rocks.pop(); continue; }
+      return true;
+    }
+    return false;
+  }
+
   // ---- anchor rocks: the posts the player ties the line to ----
-  if (n >= 3) {
-    const anchors = mode === "rocks" ? 4 : (mode === "corner" ? 2 : 3);
+  if (n >= 3 && mode === "rocks") {
+    // a rock ridge hugging the animal: it closes most of the circle by
+    // itself and leaves one opening for the player to shut with a single
+    // short arc - the only affordable seal away from the fence
+    const ridgeBase = r() * 6.28;
+    const stepA = 1.0 + r() * 0.25;
+    for (k = 0; k < 4; k++) {
+      for (t2 = 0; t2 < 8; t2++) {
+        const ang = ridgeBase + k * stepA + (r() - 0.5) * 0.3;
+        const s = 0.8 + r() * 0.25;
+        // closest legal radius first, so the rock hugs the no-draw circle
+        // whenever the geometry allows it
+        if (placeAnchor(ang, s, true)) break;
+      }
+    }
+  } else if (n >= 3) {
+    const anchors = mode === "corner" ? 2 : 3;
     const base = r() * 6.28;
     for (k = 0; k < anchors; k++) {
-      for (t2 = 0; t2 < 18; t2++) {
+      for (t2 = 0; t2 < 8; t2++) {
         const ang = base + k * (6.28 / anchors) + (r() - 0.5) * 0.8;
-        const rad = 78 + r() * 20;
-        x = L.ax + Math.cos(ang) * rad;
-        y = L.ay + Math.sin(ang) * rad;
-        if (!rockClear(x, y, 74)) continue;
-        addRock(x, y, 0.8 + r() * 0.25);
-        if (!slotOK()) { L.rocks.pop(); continue; }
-        break;
+        const s = 0.8 + r() * 0.25;
+        if (placeAnchor(ang, s, false)) break;
       }
     }
   }
@@ -303,6 +377,7 @@ function tryGen(level: number, seed: number): Level {
       y = FY0 + 50 + r() * (FY1 - FY0 - 100);
       if (!rockClear(x, y, 150)) continue;
       addRock(x, y, 0.75 + r() * 0.55);
+      if (!rockGapOK()) { L.rocks.pop(); continue; }
       break;
     }
   }
@@ -433,20 +508,23 @@ function tryGen(level: number, seed: number): Level {
     // tutorial levels: enough ink to simply loop around the animal
     L.ink = Math.round(ENC_COST * 1.15);
   } else {
-    // 58% of an enclosure down to 50% at the plateau, and always below the
-    // tightest legal ring - a circle around the animal can never be closed,
-    // so the line must lean on the fence and the rocks
-    const frac = clamp(0.58 - (n - 3) * 0.0045, 0.50, 0.58);
+    // the budget follows the layout's verified seal cost - a comfortable
+    // margin early that tightens with the levels, always at least 12% over
+    // the seal, and always below the tightest legal ring so a circle around
+    // the animal can never be closed - the line must lean on the fence and
+    // the rocks
+    const m = clamp(1.5 - (n - 3) * 0.02, 1.24, 1.5);
     const lo2 = seal * 1.12, hi2 = TIGHT_RING * 0.95;
     if (lo2 > hi2) return fail(L);             // not sealable on this budget
-    L.ink = Math.round(clamp(ENC_COST * frac, lo2, hi2));
+    if (n <= 8 && seal * m > hi2) return fail(L);  // learners get full margin
+    L.ink = Math.round(clamp(seal * m, lo2, hi2));
   }
   return L;
 }
 
 export function genLevel(level: number): Level {
   let attempt = 0, L: Level | null = null, fallback: Level | null = null;
-  while (attempt < 24) {
+  while (attempt < 48) {
     L = tryGen(level, attempt === 0 ? level : (level * 31 + attempt) | 0);
     if (L.ok) return L;
     // keep the closest miss in case no seed passes the guard
