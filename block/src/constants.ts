@@ -17,3 +17,9 @@ export const GAP_MAX = GROUND_Y - GAP_H - 30;
 export const PLAYER_X = 50;
 export const HIT_INSET = 2; // forgiving hitbox
 export const DEAD_LOCK = 0.3; // s before restart is accepted
+
+// mystery pickups (designed by Arthur Harwig): rolled once per tower, each
+// grab re-rolls the run's speed multiplier anywhere in [MIN, MAX]
+export const PICKUP_CHANCE = 1 / 12;
+export const SPEED_MULT_MIN = 0.5;
+export const SPEED_MULT_MAX = 2;

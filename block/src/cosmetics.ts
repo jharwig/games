@@ -71,6 +71,17 @@ export const FACES: FaceDef[] = [
   { id: 'silly', price: 70, feats: ['eyes', 'smile', 'tongue'] },
 ];
 
+// animations: a third, optional slot. 'none' means nothing is worn.
+export interface AnimDef {
+  id: string;
+  price: number;
+  label: string;
+}
+
+export const ANIMS: AnimDef[] = [
+  { id: 'sparkle', price: 110, label: 'SPARKLE TRAIL' },
+];
+
 export function colorById(id: string): ColorDef {
   return COLORS.find((c) => c.id === id) || COLORS[0];
 }
@@ -84,21 +95,26 @@ export let wallet = 0;
 export let runCoins = 0;
 export let equipFace = 'plain';
 export let equipColor = 'orange';
+export let equipAnim = 'none';
 export const ownedFaces: Record<string, 1> = { plain: 1 };
 export const ownedColors: Record<string, 1> = { orange: 1 };
+export const ownedAnims: Record<string, 1> = {};
 
 try {
   wallet = parseInt(localStorage.getItem('block.coins') || '', 10) || 0;
   const ow = JSON.parse(localStorage.getItem('block.owned') || '{}');
   if (Array.isArray(ow.faces)) for (const id of ow.faces) ownedFaces[String(id)] = 1;
   if (Array.isArray(ow.colors)) for (const id of ow.colors) ownedColors[String(id)] = 1;
+  if (Array.isArray(ow.anims)) for (const id of ow.anims) ownedAnims[String(id)] = 1;
   equipFace = localStorage.getItem('block.face') || 'plain';
   equipColor = localStorage.getItem('block.color') || 'orange';
+  equipAnim = localStorage.getItem('block.anim') || 'none';
 } catch {
   /* private mode / bad data: fall back to defaults */
 }
 if (!ownedFaces[equipFace]) equipFace = 'plain';
 if (!ownedColors[equipColor]) equipColor = 'orange';
+if (equipAnim !== 'none' && !ownedAnims[equipAnim]) equipAnim = 'none';
 
 function saveWallet(): void {
   try {
@@ -112,9 +128,14 @@ function saveCosmetics(): void {
   try {
     localStorage.setItem('block.face', equipFace);
     localStorage.setItem('block.color', equipColor);
+    localStorage.setItem('block.anim', equipAnim);
     localStorage.setItem(
       'block.owned',
-      JSON.stringify({ faces: Object.keys(ownedFaces), colors: Object.keys(ownedColors) }),
+      JSON.stringify({
+        faces: Object.keys(ownedFaces),
+        colors: Object.keys(ownedColors),
+        anims: Object.keys(ownedAnims),
+      }),
     );
   } catch {
     /* private mode */
@@ -139,14 +160,30 @@ export function trySpend(v: number): boolean {
   return true;
 }
 
-export function ownItem(kind: 'face' | 'color', id: string): void {
-  (kind === 'face' ? ownedFaces : ownedColors)[id] = 1;
+export type Kind = 'face' | 'color' | 'anim';
+
+function ownedSetFor(kind: Kind): Record<string, 1> {
+  return kind === 'face' ? ownedFaces : kind === 'color' ? ownedColors : ownedAnims;
+}
+
+export function isOwned(kind: Kind, id: string): boolean {
+  return !!ownedSetFor(kind)[id];
+}
+
+export function isEquipped(kind: Kind, id: string): boolean {
+  return (kind === 'face' ? equipFace : kind === 'color' ? equipColor : equipAnim) === id;
+}
+
+export function ownItem(kind: Kind, id: string): void {
+  ownedSetFor(kind)[id] = 1;
   saveCosmetics();
 }
 
-export function setEquip(kind: 'face' | 'color', id: string): void {
+// an animation can be taken off again ('none'); face and color always wear something
+export function setEquip(kind: Kind, id: string): void {
   if (kind === 'face') equipFace = id;
-  else equipColor = id;
+  else if (kind === 'color') equipColor = id;
+  else equipAnim = id;
   applyLook();
   saveCosmetics();
 }

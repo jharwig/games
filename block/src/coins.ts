@@ -15,7 +15,7 @@ export const COIN_TIERS = [
   { name: 'gold', value: 10, cols: ['#ffe9a0', '#ffd166', '#8c6a1e'] },
 ] as const;
 
-interface Coin {
+export interface Coin {
   x: number;
   y: number;
   tier: number;
@@ -28,36 +28,40 @@ export function resetCoins(): void {
   coins.length = 0;
 }
 
-// rolled once per spawned tower
-export function spawnCoins(x: number, gapTop: number): void {
+// rolled once per spawned tower; returns the coin so a mystery pickup
+// sharing the gap can stack against it
+export function spawnCoins(x: number, gapTop: number): Coin | null {
   const r = Math.random();
   const phase = Math.random() * Math.PI * 2;
+  let c: Coin | null = null;
   if (r < 0.08) {
     // gold: far off the safe line, between this tower and the next -
     // a ceiling graze or a dive toward the pavement
-    coins.push({
+    c = {
       x: x + COL_W + SPACING / 2 - COIN_W / 2,
       y: Math.random() < 0.5 ? 14 : GROUND_Y - 16 - COIN_W,
       tier: 2,
       phase,
-    });
+    };
   } else if (r < 0.33) {
     // silver: hugging the lip of the gap
-    coins.push({
+    c = {
       x: x + (COL_W - COIN_W) / 2,
       y: Math.random() < 0.5 ? gapTop + 3 : gapTop + GAP_H - 3 - COIN_W,
       tier: 1,
       phase,
-    });
+    };
   } else if (r < 0.88) {
     // bronze: the safe middle of the gap
-    coins.push({
+    c = {
       x: x + (COL_W - COIN_W) / 2,
       y: gapTop + (GAP_H - COIN_W) / 2,
       tier: 0,
       phase,
-    });
+    };
   }
+  if (c) coins.push(c);
+  return c;
 }
 
 function bobY(c: Coin, clock: number): number {

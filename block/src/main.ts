@@ -11,12 +11,15 @@ import {
   audio, initAudio, applyMute, startMusic, stopMusic, pumpMusic, sfxExplosion, sfxMilestone,
 } from './audio';
 import { COL_W, drawColumn, type Column } from './blocks';
-import { S, wallet, runCoins, resetRunCoins } from './cosmetics';
+import { S, wallet, runCoins, resetRunCoins, equipAnim } from './cosmetics';
 import { drawHero } from './hero';
 import { particles, updateParticles, drawParticles, explodeHero, explodeNearbyBlocks } from './particles';
 import { resetCoins, spawnCoins, updateCoins, drawCoins, drawCoinAt } from './coins';
+import { speedMult, resetPickups, spawnPickup, updatePickups, drawPickups } from './pickups';
+import { resetTrail, emitTrail, updateTrail, drawTrail } from './trail';
 import {
-  drawShop, shopPress, tickShop, drawButton, inRect,
+  drawShop, tickShop, drawButton, inRect, resetShopScroll,
+  shopPointerDown, shopPointerMove, shopPointerUp, shopWheel,
   TITLE_SHOP_BTN, DEAD_SHOP_BTN, type Point,
 } from './shop';
 
@@ -58,6 +61,8 @@ let abT = 0;
 function resetScene(): void {
   columns.length = 0;
   resetCoins();
+  resetPickups();
+  resetTrail();
   particles.length = 0;
   resetScroll();
   speed = SPEED_BASE;
@@ -96,6 +101,7 @@ function toTitle(): void {
 
 function enterShop(): void {
   state = SHOP;
+  resetShopScroll();
   stopMusic();
   setPauseButtonVisible(false);
 }
@@ -137,7 +143,8 @@ function spawnColumn(x: number): void {
     seed: Math.floor(Math.random() * 6),
     scored: false,
   });
-  spawnCoins(x, gapTop);
+  const coin = spawnCoins(x, gapTop);
+  spawnPickup(x, gapTop, coin);
 }
 
 function currentSpeed(): number {
@@ -218,6 +225,7 @@ function step(dt: number): void {
   clock += dt;
   // all inside the fixed timestep, so 60Hz == 120Hz
   updateParticles(dt);
+  updateTrail(dt);
   updateImpactFx(dt);
 
   if (state === TITLE) {
@@ -225,6 +233,7 @@ function step(dt: number): void {
     scrollWorld(dt, speed);
     player.y = 148 + Math.sin(clock * 2.4) * 3;
     player.tilt = Math.sin(clock * 2.4 + 1.6) * 0.05;
+    if (equipAnim === 'sparkle') emitTrail(dt, PLAYER_X, player.y, speed, clock);
     return;
   }
 
@@ -235,7 +244,8 @@ function step(dt: number): void {
   }
 
   if (state === PLAYING) {
-    speed = currentSpeed();
+    // mystery pickups re-roll speedMult; it sticks until the next one
+    speed = currentSpeed() * speedMult;
     scrollWorld(dt, speed);
 
     player.vy += GRAVITY * dt;
@@ -269,6 +279,8 @@ function step(dt: number): void {
 
     // coins drift with the towers and bank the moment they are touched
     updateCoins(dt, speed, player.y, clock);
+    updatePickups(dt, speed, player.y, clock);
+    if (equipAnim === 'sparkle') emitTrail(dt, PLAYER_X, player.y, speed, clock);
 
     const hit = checkCollision();
     if (hit) die(hit);
@@ -386,8 +398,12 @@ function render(): void {
   // ground on top of column feet
   drawGroundStrip();
 
-  // coins float in the play space
+  // coins and mystery pickups float in the play space
   drawCoins(clock);
+  drawPickups(clock);
+
+  // sparkle trail behind the player
+  drawTrail(clock);
 
   // player
   if (heroAlive) {
@@ -438,7 +454,7 @@ function render(): void {
       drawText('TAP TO RESUME', W / 2, 156, 1, '#9aa3c8', P.hudShadow);
     }
   } else if (state === SHOP) {
-    drawShop();
+    drawShop(clock);
   } else {
     drawText(String(score), W / 2, 14, 5, P.hud, P.hudShadow);
     if (deadTime >= DEAD_LOCK) {
@@ -480,8 +496,15 @@ function render(): void {
 // input
 // =========================================================================
 function pointFromEvent(e: MouseEvent | TouchEvent): Point | null {
-  const t = 'touches' in e && e.touches.length ? e.touches[0] : (e as MouseEvent);
-  if (t.clientX === undefined) return null;
+  let t: { clientX?: number; clientY?: number };
+  if ('touches' in e) {
+    if (e.touches.length) t = e.touches[0];
+    else if (e.changedTouches && e.changedTouches.length) t = e.changedTouches[0];
+    else return null;
+  } else {
+    t = e;
+  }
+  if (t.clientX === undefined || t.clientY === undefined) return null;
   const r = canvas.getBoundingClientRect();
   if (!r.width || !r.height) return null;
   return { x: ((t.clientX - r.left) * W) / r.width, y: ((t.clientY - r.top) * H) / r.height };
@@ -491,7 +514,8 @@ function onPress(p: Point | null): void {
   if (state === PAUSED) return;
   initAudio();
   if (state === SHOP) {
-    if (shopPress(p)) exitShop();
+    // the shop scrolls, so a press only starts a drag; the tap is decided on release
+    shopPointerDown(p);
     return;
   }
   if (state === TITLE) {
@@ -513,15 +537,46 @@ function onPress(p: Point | null): void {
   }
 }
 
+function onMove(p: Point | null): void {
+  if (state === SHOP) shopPointerMove(p);
+}
+
+function onRelease(p: Point | null): void {
+  if (state === SHOP && shopPointerUp(p)) exitShop();
+}
+
 document.addEventListener('mousedown', (e) => {
   e.preventDefault();
   onPress(pointFromEvent(e));
 });
+document.addEventListener('mousemove', (e) => onMove(pointFromEvent(e)));
+document.addEventListener('mouseup', (e) => onRelease(pointFromEvent(e)));
 window.addEventListener(
   'touchstart',
   (e) => {
     e.preventDefault();
     onPress(pointFromEvent(e));
+  },
+  { passive: false },
+);
+window.addEventListener(
+  'touchmove',
+  (e) => {
+    e.preventDefault();
+    onMove(pointFromEvent(e));
+  },
+  { passive: false },
+);
+window.addEventListener('touchend', (e) => onRelease(pointFromEvent(e)));
+window.addEventListener('touchcancel', (e) => onRelease(pointFromEvent(e)));
+window.addEventListener(
+  'wheel',
+  (e) => {
+    if (state !== SHOP) return;
+    e.preventDefault();
+    const r = canvas.getBoundingClientRect();
+    const scale = r.height ? H / r.height : 1;
+    shopWheel(e.deltaY * scale * 0.5);
   },
   { passive: false },
 );

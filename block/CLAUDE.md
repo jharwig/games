@@ -26,14 +26,20 @@ are canvas overlays — the only DOM is the pause button.
   seeded PRNG. `palette.ts` — every colour.
 - `background.ts` — pre-rendered sky/skyline/ground tiles + parallax scroll.
 - `blocks.ts` — tower bricks (normal/damaged) and column drawing.
-- `cosmetics.ts` — Arthur's faces + colours, the coin wallet, owned/equipped
-  persistence (`block.coins`, `block.owned`, `block.face`, `block.color`),
-  and `buildGrid`, which bakes the equipped look into the hero sprite grid
-  (so debris and the tilt shear inherit it).
+- `cosmetics.ts` — Arthur's faces + colours + animations, the coin wallet,
+  owned/equipped persistence (`block.coins`, `block.owned`, `block.face`,
+  `block.color`, `block.anim`), and `buildGrid`, which bakes the equipped
+  look into the hero sprite grid (so debris and the tilt shear inherit it).
+- `trail.ts` — the Sparkle Trail animation (rainbow sparks behind the block)
+  plus the looping shop preview.
 - `hero.ts` — cube rendering with propeller and tilt shear.
 - `coins.ts` — coin spawn rules (bronze safe / silver gap lip / gold ceiling
   or ground dive between towers), pickup, drawing.
-- `shop.ts` — shop screen layout, drawing, and purchase/equip logic.
+- `pickups.ts` — mystery pickups (rainbow squares, 1 in 12 towers) and the
+  run's `speedMult`, re-rolled in [0.5, 2] on each grab.
+- `shop.ts` — shop screen layout, drawing, and purchase/equip logic. The
+  shelves scroll (drag / wheel) between a fixed header and footer; a press
+  only starts a drag and the tap is decided on release.
 - `particles.ts` — pixel debris + block destruction.
 - `audio.ts` — synthesized chiptune + SFX (Web Audio).
 

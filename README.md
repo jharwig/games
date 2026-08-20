@@ -16,8 +16,9 @@ Block is a one-button arcade game in a retro pixel-art style. You guide a small 
 - The game gets faster every 5 points, up to a maximum speed.
 - If you hit a tower or the ground, the hero and the nearby blocks explode into pixel debris, and the run ends.
 - Your best score is saved in the browser.
+- **Mystery pickups** — rainbow squares that sometimes float in the middle of a gap. Grab one and your speed changes to a random amount, anywhere from half speed to double speed. You can't tell which until you grab it, and it sticks until you grab the next one. Every run starts at normal speed.
 
-Coins float around the towers: **bronze is worth 1**, **silver 5**, **gold 10** — the more valuable the coin, the riskier the spot it floats in. Coins are banked the moment you touch them (dying never takes them away) and are saved in the browser. Spend them in the **shop** — a SHOP button on the title and game-over screens — on new faces and body colors for the block, drawn from Arthur's designs. Your look is saved too, and the block explodes in its equipped colors.
+Coins float around the towers: **bronze is worth 1**, **silver 5**, **gold 10** — the more valuable the coin, the riskier the spot it floats in. Coins are banked the moment you touch them (dying never takes them away) and are saved in the browser. Spend them in the **shop** — a SHOP button on the title and game-over screens — on new faces, body colors and animations for the block, drawn from Arthur's designs (the **Sparkle Trail** animation, 110 coins, leaves a rainbow sparkle trail behind the block and can be worn with any face and color). The shop scrolls — drag or use the mouse wheel. Your look is saved too, and the block explodes in its equipped colors.
 
 The scene is drawn on a 160×288 pixel canvas: a starry sky with a cratered moon, two layers of parallax city skyline with lit windows, and a chiptune soundtrack with a mute toggle.
 
