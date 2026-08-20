@@ -87,11 +87,13 @@ function proceduralRevolver(): THREE.Group {
   const g = new THREE.Group();
   g.add(box(0.03, 0.09, 0.04, walnut, 0, -0.045, 0.045));           // grip
   g.add(box(0.028, 0.055, 0.11, blued, 0, 0.012, -0.01));           // frame
-  const cylinder = cyl(0.024, 0.024, 0.05, steel, 0, 0.022, -0.03, Math.PI / 2, 'cylinder');
-  // flutes
+  // cylinder: a group whose local Z is the bore axis, so spinning rotation.z rolls it around the barrel
+  const cylinder = new THREE.Group(); cylinder.name = 'cylinder'; cylinder.position.set(0, 0.022, -0.03);
+  cylinder.add(cyl(0.024, 0.024, 0.05, steel));
+  // flutes, spaced around the bore
   for (let i = 0; i < 6; i++) {
-    const f = cyl(0.005, 0.005, 0.052, blued, Math.cos(i / 6 * Math.PI * 2) * 0.02, Math.sin(i / 6 * Math.PI * 2) * 0.02, 0, 0);
-    f.rotation.set(0, 0, 0); cylinder.add(f);
+    const a = i / 6 * Math.PI * 2;
+    cylinder.add(cyl(0.005, 0.005, 0.052, blued, Math.cos(a) * 0.02, Math.sin(a) * 0.02, 0));
   }
   g.add(cylinder);
   g.add(cyl(0.01, 0.01, 0.19, blued, 0, 0.03, -0.15));              // barrel
@@ -269,9 +271,10 @@ export function updateGuns(dt: number) {
       const s = Math.sin(t * Math.PI);
       r.rotation.z += s * 0.9; r.rotation.x += s * 0.5; r.position.y -= s * 0.08;
       cylSpin += dt * (8 + 30 * s);
-      if (v.cylinder) v.cylinder.rotation.z = cylSpin;
+      if (v.cylinder) v.cylinder.rotation.z = -cylSpin;
     } else if (v.cylinder) {
-      v.cylinder.rotation.z = lerp(v.cylinder.rotation.z, (REVOLVER_ROUNDS - gun.rounds) * (Math.PI * 2 / 6), 0.35);
+      // +Z points back at the shooter, so a negative angle reads as clockwise from behind the gun (like a real SAA)
+      v.cylinder.rotation.z = lerp(v.cylinder.rotation.z, -(REVOLVER_ROUNDS - gun.rounds) * (Math.PI * 2 / 6), 0.35);
     }
     if (v.hammer) v.hammer.rotation.x = gun.state === 'cycling' ? -0.6 : lerp(v.hammer.rotation.x, 0, 0.3);
   }
