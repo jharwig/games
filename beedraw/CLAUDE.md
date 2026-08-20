@@ -16,8 +16,10 @@ root `CLAUDE.md`.
 
 - `main.ts` — canvas scaling, game state machine (`TITLE`/`LEVELS`/`PLAY`,
   play sub-phases `draw → attack → winseq/loseseq → win/lose`), the ink-stroke
-  input model (`validInk`/`clampToValid`/`addInkPoint`), bee simulation
-  (flow-field steering + grid collision), HUD/overlays, rAF loop, input.
+  input model (`validInk`/`clampToValid`/`addInkPoint`, plus `slidePoint` so
+  the tip follows obstacle edges and `tryErase` so retracing the line refunds
+  ink), bee simulation (flow-field steering + grid collision), HUD/overlays,
+  rAF loop, input.
 - `level.ts` — seeded level generation (`genLevel`/`tryGen`) and the
   solvability guard (`ringSealCost`/`sealedFor`), plus the geometry tests
   (`pointInRock`/`pointInPond`/`inField`) and gap helpers.

@@ -56,13 +56,17 @@ Ninja Adventure is a third-person 3D obstacle-course game in a bright cartoon lo
 Bee Draw is a puzzle game about one line. A swarm of bees tries to reach the animal you chose — a dog, a cat, a cow, a chicken, or a horse. You draw one line of ink to block them. When you lift your finger, the bees are released and they fly.
 
 - Keep the animal safe for 7 seconds to win the level.
-- You have a limited amount of ink, so each line must count.
-- The levels are endless and randomly generated from a seed. Each level is more difficult than the one before: more bees, less ink, ponds where you cannot draw, honey pots that lure the bees away, and fast bees.
+- You have a limited amount of ink, so each line must count — the budget is
+  tuned to each level's layout, and it gets tighter as you climb.
+- Made a bad line? Draw backwards along it to erase it and get the ink back
+  (as long as your finger stays down).
+- The levels are endless and randomly generated from a seed. Each level is more difficult than the one before: more bees, less ink, ponds where you cannot draw, honey pots that lure the bees away, and fast bees. Sometimes the animal shelters by the fence, sometimes in a nook of boulders out in the open.
 - Your progress is saved automatically in the browser.
 
 ### Controls
 
 - **Draw** — hold one finger or the mouse button and move to make the line
+- **Draw backwards along the line** — erase it and refund the ink
 - **Lift the finger / release the button** — release the bees
 - **Tap the buttons** — change the level, change the animal, or mute the sound
 

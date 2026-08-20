@@ -239,9 +239,43 @@ function slidePoint(last: { x: number; y: number }, x: number, y: number): { x: 
   return best;
 }
 
+// retracing the line erases it and refunds the ink - a bad wall is not a
+// lost level as long as the finger stays down
+const ERASE_R = 9, ERASE_LOOK = 90, ERASE_MIN = 6;
+
+function tryErase(x: number, y: number): boolean {
+  if (stroke.length < 2) return false;
+  // nearest point on the tail of the stroke to the pointer
+  let acc = 0, bestSeg = -1, bestT = 0, bestD = ERASE_R;
+  for (let i = stroke.length - 1; i >= 1; i--) {
+    const a = stroke[i - 1], b = stroke[i];
+    const vx = b.x - a.x, vy = b.y - a.y;
+    const len = Math.sqrt(vx * vx + vy * vy);
+    const t = len ? clamp(((x - a.x) * vx + (y - a.y) * vy) / (len * len), 0, 1) : 0;
+    const d = Math.sqrt(dist2(x, y, a.x + vx * t, a.y + vy * t));
+    if (d < bestD) { bestD = d; bestSeg = i; bestT = t; }
+    acc += len;
+    if (acc > ERASE_LOOK) break;
+  }
+  if (bestSeg < 0) return false;
+  // how much line sits between the hit and the tip
+  const a = stroke[bestSeg - 1], b = stroke[bestSeg];
+  const cut = { x: a.x + (b.x - a.x) * bestT, y: a.y + (b.y - a.y) * bestT };
+  let removed = Math.sqrt(dist2(cut.x, cut.y, b.x, b.y));
+  for (let i = bestSeg + 1; i < stroke.length; i++) {
+    removed += Math.sqrt(dist2(stroke[i - 1].x, stroke[i - 1].y, stroke[i].x, stroke[i].y));
+  }
+  if (removed < ERASE_MIN) return false;    // just drawing near the tip
+  stroke.length = bestSeg;
+  if (bestT > 0.05) stroke.push(cut);
+  inkLeft = Math.min(L.ink, inkLeft + removed);
+  sfxPlip();
+  return true;
+}
+
 function addInkPoint(x: number, y: number): void {
-  if (inkLeft <= 0) return;
   if (stroke.length === 0) {
+    if (inkLeft <= 0) return;
     if (!validInk(x, y)) return;
     stroke.push({ x: x, y: y });
     sfxPlip();
@@ -250,6 +284,8 @@ function addInkPoint(x: number, y: number): void {
   const last = stroke[stroke.length - 1];
   const d = Math.sqrt(dist2(x, y, last.x, last.y));
   if (d < 2) return;
+  if (tryErase(x, y)) return;
+  if (inkLeft <= 0) return;
   let p = clampToValid(last.x, last.y, x, y);
   let seg = p ? Math.sqrt(dist2(p.x, p.y, last.x, last.y)) : 0;
   if (!p || seg < 1) {                  // blocked - slide along the obstacle
@@ -470,7 +506,7 @@ function drawHUD(c: CanvasRenderingContext2D): void {
 
   // hint pill
   let hint = null;
-  if (phase === "draw") hint = stroke.length ? "lift to start the bees" : "draw a line - lift to start the bees";
+  if (phase === "draw") hint = stroke.length ? "lift to start - draw back to erase" : "draw a line - lift to start the bees";
   else if (phase === "attack") hint = "keep the bees away!";
   if (hint) {
     const w = hint.length * 9 + 32;
