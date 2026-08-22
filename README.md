@@ -142,3 +142,26 @@ Circle the Wagons is a first-person shooting gallery on a golden-hour prairie. Y
 ### Credits
 
 Circle the Wagons uses third-party CC-BY and CC0 art and audio. Every asset and its author are listed in [`wagons/CREDITS.md`](wagons/CREDITS.md).
+
+## Grumpy Grandpa
+
+**Designed by Cabin**
+
+**Play:** https://jharwig.github.io/games/grandpa/
+
+Grumpy Grandpa is a touch-first 2D room-management game drawn like a 90s Saturday-morning cartoon. Grandpa naps in his recliner at the end of the living room while two dogs and two grandkids fill it with chaos. You are the room manager: fix or hide everything he'd hate, and stage the things he'd love, before he wakes up and looks.
+
+- Grandpa's snore is the soundtrack **and** the clock: a steady snore means you're safe, a sputtering snort means he's stirring and about to wake. You can play it by ear.
+- When he wakes, his gaze sweeps from the recliner across the whole room (about 2 seconds). Things near the chair get seen first — the far corner gives you the most grace time, and you can keep cleaning mid-sweep, just ahead of his gaze.
+- Everything he sees gets its own full-body reaction and callout — pointing, hands on hips, hand-on-forehead despair, belly-laugh chuckles ("CONSARN IT! A TOY MINEFIELD!"). He never gets out of the chair; he grumbles and dozes back off.
+- Dislikes fill his Grump Meter: scattered toys, spilled juice, muddy pawprints, torn couch cushions, the blaring TV, dogs roughhousing, kids squabbling. **Drag** messes into the toy bin, the laundry hamper, or under the couch. Tap the TV off.
+- Likes drain the meter and score big: kids' crafts placed **on the mantel or coffee table**, a kid sweeping, kids playing a board game nicely, a dog asleep in its bed. **Tap** a rowdy dog to send it to its bed, tap kids to redirect them to something nice — it never lasts.
+- If the Grump Meter fills, Grandpa blows his top — kettle whistle, guilty freeze-frame, and the score card: "You lasted N hours."
+- Endless and escalating: every survived wake-up chimes the mantel clock ahead one hour, and naps get shorter, warnings briefer, and chaos faster. Hours survived is the headline stat; your best is saved in the browser.
+
+### Controls
+
+- **Drag** — carry messes to a stash spot (toy bin, hamper, under the couch) and crafts up onto a display spot (mantel, coffee table)
+- **Tap** — settle a dog, redirect a kid, or shut off the TV
+- **Speaker button** — mute / unmute
+- On the title screen, pick your **two dogs** — Nova, Will-E, Gnocchi, or Lulu (remembered for next time). The two grandkids are drawn at random each run.

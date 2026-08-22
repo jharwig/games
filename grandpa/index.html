@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#2a1e3f" />
+  <title>Grumpy Grandpa</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      height: 100%; overflow: hidden; background: #2a1e3f;
+      font-family: "Chalkboard SE", "Comic Sans MS", "Trebuchet MS", "Arial Rounded MT Bold", sans-serif;
+      -webkit-user-select: none; user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+    #wrap { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+    canvas { display: block; touch-action: none; }
+
+    /* ---- HUD ---- */
+    #hud {
+      position: fixed; left: 0; right: 0; top: 0; display: none;
+      align-items: center; gap: 10px; padding: 8px 12px;
+      pointer-events: none; z-index: 5;
+      padding-top: max(8px, env(safe-area-inset-top));
+    }
+    #hud.on { display: flex; }
+    .plate {
+      background: #fff8e7; border: 3px solid #241a10; border-radius: 12px;
+      box-shadow: 0 3px 0 #241a10; padding: 4px 10px;
+      font-weight: bold; color: #241a10; font-size: 16px; white-space: nowrap;
+    }
+    #score { min-width: 90px; text-align: center; }
+    #meterPlate { flex: 1; display: flex; align-items: center; gap: 8px; max-width: 420px; margin: 0 auto; }
+    #meterFace { font-size: 20px; line-height: 1; }
+    #meterTrack {
+      flex: 1; height: 16px; border: 3px solid #241a10; border-radius: 8px;
+      background: #e8ddc4; overflow: hidden;
+    }
+    #meterFill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #57b843, #f2c114 55%, #e0322a);
+      background-size: 380px 100%; transition: width .35s ease;
+    }
+    #hourPlate { text-align: center; }
+    #muteBtn { pointer-events: auto; cursor: pointer; font-size: 16px; }
+
+    /* ---- overlays ---- */
+    .overlay {
+      position: fixed; inset: 0; display: none; z-index: 10;
+      align-items: center; justify-content: center; flex-direction: column;
+      background: rgba(30, 18, 50, 0.45); padding: 16px;
+    }
+    .overlay.on { display: flex; }
+    .card {
+      background: #fff8e7; border: 5px solid #241a10; border-radius: 22px;
+      box-shadow: 0 8px 0 #241a10; padding: 18px 22px; text-align: center;
+      color: #241a10; max-width: 520px; width: 100%;
+      max-height: 92vh; overflow-y: auto;
+    }
+    h1.logo {
+      font-size: clamp(30px, 7vw, 46px); letter-spacing: 1px; line-height: 1.02;
+      color: #e0322a; -webkit-text-stroke: 2px #241a10;
+      text-shadow: 3px 3px 0 #241a10; transform: rotate(-2deg); margin-bottom: 2px;
+    }
+    .byline { font-size: 14px; margin-bottom: 10px; }
+    .blurb { font-size: 14px; margin: 6px 0 12px; line-height: 1.35; }
+    .pickLabel { font-weight: bold; font-size: 15px; margin-bottom: 6px; }
+    #dogRow { display: flex; gap: 10px; justify-content: center; margin-bottom: 12px; flex-wrap: wrap; }
+    .dogBtn {
+      border: 3px solid #241a10; border-radius: 14px; background: #cfe6f5;
+      box-shadow: 0 3px 0 #241a10; padding: 6px 6px 2px; cursor: pointer;
+      font-family: inherit; font-weight: bold; font-size: 12px; color: #241a10;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      opacity: 0.85;
+    }
+    .dogBtn canvas { width: 64px; height: 48px; image-rendering: auto; }
+    .dogBtn.picked {
+      background: #ffd94d; opacity: 1;
+      transform: translateY(-2px) rotate(-1deg); box-shadow: 0 5px 0 #241a10;
+    }
+    .bigBtn {
+      font-family: inherit; font-size: 22px; font-weight: bold; cursor: pointer;
+      background: #57b843; color: #fff; border: 4px solid #241a10;
+      border-radius: 16px; box-shadow: 0 5px 0 #241a10; padding: 10px 34px;
+      -webkit-text-stroke: 1px #241a10; letter-spacing: 1px;
+    }
+    .bigBtn:active { transform: translateY(3px); box-shadow: 0 2px 0 #241a10; }
+    .bigBtn:disabled { background: #b7b0a0; cursor: default; }
+    .best { margin-top: 10px; font-size: 14px; }
+    .howto { font-size: 13px; text-align: left; margin: 0 auto 12px; max-width: 380px; line-height: 1.4; }
+    .howto b { color: #b0451c; }
+
+    #overTitle {
+      font-size: clamp(26px, 6vw, 40px); color: #e0322a; line-height: 1.05;
+      -webkit-text-stroke: 2px #241a10; text-shadow: 3px 3px 0 #241a10;
+      transform: rotate(-2deg); margin-bottom: 10px;
+    }
+    #overHours { font-size: 24px; font-weight: bold; margin-bottom: 4px; }
+    #overScore { font-size: 16px; margin-bottom: 12px; }
+  </style>
+</head>
+<body>
+  <div id="wrap"><canvas id="game"></canvas></div>
+
+  <div id="hud">
+    <div class="plate" id="score">0</div>
+    <div class="plate" id="meterPlate">
+      <span id="meterFace">😴</span>
+      <div id="meterTrack"><div id="meterFill"></div></div>
+    </div>
+    <div class="plate" id="hourPlate">🕐 <span id="hour">0</span>h</div>
+    <div class="plate" id="muteBtn">🔊</div>
+  </div>
+
+  <div class="overlay on" id="title">
+    <div class="card">
+      <h1 class="logo">GRUMPY GRANDPA</h1>
+      <div class="byline">Designed by <b>Cabin</b></div>
+      <div class="howto">
+        Grandpa's napping. Keep him that way happy!<br />
+        <b>Drag</b> messes into the toy bin, hamper, or under the couch —
+        and put the kids' crafts up on the <b>mantel</b> where he'll see them.<br />
+        <b>Tap</b> a rowdy dog or squabbling kid to settle them down.<br />
+        Listen to the snoring — a <b>snort</b> means he's about to wake up!
+      </div>
+      <div class="pickLabel">Pick two dogs:</div>
+      <div id="dogRow"></div>
+      <button class="bigBtn" id="startBtn" disabled>NAP TIME!</button>
+      <div class="best" id="titleBest"></div>
+    </div>
+  </div>
+
+  <div class="overlay" id="gameover">
+    <div class="card">
+      <div id="overTitle">GRANDPA BLEW HIS TOP!</div>
+      <div id="overHours"></div>
+      <div id="overScore"></div>
+      <button class="bigBtn" id="retryBtn">TRY AGAIN</button>
+      <div class="best" id="overBest"></div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
