@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Nitro Racing — style preview</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+    body { font-family: "Avenir Next", "Segoe UI", system-ui, sans-serif; color: #fff; user-select: none; }
+    #app { position: fixed; inset: 0; }
+    canvas { display: block; }
+    #bar {
+      position: fixed; left: 12px; top: 12px; display: flex; flex-direction: column; gap: 8px;
+      background: rgba(0,0,0,.55); padding: 10px 12px; border-radius: 12px; backdrop-filter: blur(6px);
+      font-size: 12px;
+    }
+    #bar.hidden { display: none; }
+    .grp { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .grp span { width: 62px; opacity: .6; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; font-size: 10px; }
+    button {
+      font: inherit; font-weight: 800; color: #fff; background: rgba(255,255,255,.12); border: 2px solid transparent;
+      border-radius: 999px; padding: 5px 12px; cursor: pointer;
+    }
+    button.on { border-color: #ffd12e; color: #ffd12e; }
+    #hint { position: fixed; right: 12px; bottom: 10px; font-size: 11px; opacity: .55; }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="bar"></div>
+  <div id="hint">Space: pause / drive · H: hide this panel for a clean screenshot</div>
+  <script type="module" src="/src/mockup.ts"></script>
+</body>
+</html>

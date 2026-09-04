@@ -165,3 +165,32 @@ Grumpy Grandpa is a touch-first 2D room-management game drawn like a 90s Saturda
 - **Tap** — settle a dog, redirect a kid, or shut off the TV
 - **Speaker button** — mute / unmute
 - On the title screen, pick your **two dogs** — Nova, Will-E, Gnocchi, or Lulu (remembered for next time). The two grandkids are drawn at random each run.
+
+## Nitro Racing
+
+**Designed by Alex**
+
+**Play:** https://jharwig.github.io/games/nitro/
+
+Nitro Racing is a third-person 3D arcade racing game in a bright cartoon style. You race alone against the clock: one lap, 3-2-1-GO, and the fastest time wins. Every track is a road built for its world, from asphalt with lane lines to a neon grid floating in space.
+
+- **Six tracks**, all open from the start, easiest first: **Speedway** (smooth asphalt, grandstands and blimps), **Beach** (packed sand at sunset, slow off the boardwalk), **Dirt Rally** (bumpy forest gravel), **Ice Lake** (very slippery, aurora overhead), **Volcano** (night, glowing lava pools to dodge), and **Space** (a floating track with no edges, hills, planets and comets).
+- Every track has **coins** to collect, **obstacles** to dodge (cones, rocks, oil slicks, tyre walls, dunes, ice cracks, lava pools, asteroids), green **speed pads** and red **slow pads**, and **checkpoints**. Driving off the road slows you down. Fall off the track in Space or drive into lava and you're put back at the last checkpoint you passed.
+- **Coins**: bronze is worth 1 (common), silver 5, gold 10 (rare). Coins are banked the moment you touch them, even if you don't finish. Spend them in the garage to unlock cars.
+- **Five cars**, each driving a little differently and each with one special ability you can use **three times per race**:
+  - **F1 Car** (free) — **Boost**: super speed for 3 seconds.
+  - **Frog** (30 coins) — **Jump**: hop over obstacles, lava and gaps.
+  - **Ghost** (60 coins) — **Phase**: pass straight through anything for 3 seconds.
+  - **Magnet** (100 coins) — **Magnet**: pulls in every nearby coin for 5 seconds.
+  - **Tank** (150 coins) — **Smash**: smash through obstacles for 5 seconds.
+- Your **best time** is saved per track, and a see-through **ghost** of your best run races alongside you so you can see whether you're ahead or behind. Beat it and you get a celebration.
+- A speedometer, race timer and ability counter on screen; engine noise, coin pickups, a boost whoosh, and different music and background sounds for every track, with a mute button.
+
+### Controls
+
+- **Left / Right** — steer
+- **Up** — gas
+- **Down** — slow down
+- **Space** — special ability (3 uses per race)
+- **M** — mute / unmute, **R** — restart the race
+- **Phone**: tilt to steer, with on-screen GAS and ABILITY buttons (and a BRAKE button). Tilt asks for permission the first time; say no and you get LEFT / RIGHT buttons instead.

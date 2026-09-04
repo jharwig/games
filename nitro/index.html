@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#12102a" />
+  <meta name="description" content="Nitro Racing — a cartoon arcade time-trial racer. Designed by Alex." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Nitro Racing</title>
+  <style>
+    :root {
+      --accent:  #ffd12e;
+      --accent2: #ff7a1a;
+      --hot:     #ff2e6a;
+      --good:    #4dffa6;
+      --bad:     #ff5c5c;
+      --ink:     #fff6e8;
+      --panel:   rgba(14, 12, 38, 0.78);
+      --panel2:  rgba(24, 20, 56, 0.92);
+      --line:    rgba(255,255,255,0.14);
+      --safe-t: env(safe-area-inset-top);
+      --safe-b: env(safe-area-inset-bottom);
+      --safe-l: env(safe-area-inset-left);
+      --safe-r: env(safe-area-inset-right);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #12102a; }
+    body {
+      font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+    #app { position: fixed; inset: 0; }
+    #app canvas { display: block; touch-action: none; }
+    button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+    .overlay { position: fixed; inset: 0; pointer-events: none; }
+    .hidden { display: none !important; }
+
+    /* ============================ shared bits ============================ */
+    .coin-ico { width: 1em; height: 1em; flex: none; vertical-align: -0.12em; }
+    .lock-ico { width: 14px; height: 14px; flex: none; vertical-align: -2px; }
+
+    .btn {
+      pointer-events: auto; cursor: pointer;
+      font-weight: 900; font-style: italic; letter-spacing: 1px;
+      color: #20143a; background: linear-gradient(180deg, var(--accent), #ffa519);
+      border-radius: 999px; padding: 14px 34px; font-size: 18px;
+      box-shadow: 0 6px 0 rgba(0,0,0,.35);
+      transition: transform .1s, filter .1s;
+      min-height: 56px;
+    }
+    .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+    .btn:disabled { filter: grayscale(1) brightness(.6); cursor: default; box-shadow: none; }
+    .btn.ghost {
+      color: var(--ink); background: var(--panel2);
+      box-shadow: 0 6px 0 rgba(0,0,0,.3); border: 2px solid var(--line);
+    }
+    .btn.huge { font-size: 26px; padding: 18px 64px; letter-spacing: 2px; min-height: 64px; }
+
+    /* ================================ HUD ================================ */
+    #hud { opacity: 0; transition: opacity .35s; z-index: 4; }
+    #hud.visible { opacity: 1; }
+    .hud-panel {
+      position: absolute;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      padding: 10px 14px;
+    }
+
+    /* --- speedometer (bottom-left) --- */
+    #speedo {
+      left: calc(20px + var(--safe-l)); bottom: calc(20px + var(--safe-b));
+      width: 168px; padding: 8px 12px 10px;
+    }
+    #speedo svg { display: block; width: 100%; height: auto; overflow: visible; }
+    #speedo .read { display: flex; align-items: baseline; gap: 6px; margin-top: -18px; justify-content: center; }
+    #speed-val { font-size: 40px; font-weight: 900; font-style: italic; letter-spacing: -2px; line-height: 1; font-variant-numeric: tabular-nums; }
+    #speedo .unit { font-size: 11px; font-weight: 800; letter-spacing: 2px; opacity: .6; }
+    #gauge-fill { transition: stroke-dashoffset .08s linear; }
+    #gauge-needle { transition: transform .08s linear; transform-origin: 50px 50px; }
+
+    /* --- timer (top-centre) --- */
+    #timer {
+      left: 50%; top: calc(12px + var(--safe-t)); transform: translateX(-50%);
+      text-align: center; min-width: 168px;
+    }
+    #time-val { font-size: 34px; font-weight: 900; font-style: italic; letter-spacing: -1px; line-height: 1; font-variant-numeric: tabular-nums; }
+    #timer .row { display: flex; gap: 10px; justify-content: center; align-items: baseline; margin-top: 3px; }
+    #best-val { font-size: 12px; font-weight: 800; letter-spacing: 1px; opacity: .6; font-variant-numeric: tabular-nums; }
+    #ghost-delta { font-size: 14px; font-weight: 900; font-style: italic; font-variant-numeric: tabular-nums; }
+    #ghost-delta.ahead { color: var(--good); }
+    #ghost-delta.behind { color: var(--bad); }
+
+    /* --- coins (top-right) --- */
+    #coins-hud {
+      right: calc(16px + var(--safe-r)); top: calc(12px + var(--safe-t));
+      display: flex; flex-direction: column; align-items: flex-end; gap: 2px; padding: 8px 12px;
+    }
+    #coins-hud .run { display: flex; align-items: center; gap: 5px; font-size: 22px; font-weight: 900; font-style: italic; color: var(--accent); font-variant-numeric: tabular-nums; }
+    #coins-hud .bank { font-size: 10px; font-weight: 800; letter-spacing: 1.5px; opacity: .6; }
+
+    /* --- checkpoints (top-left) --- */
+    #cp {
+      left: calc(16px + var(--safe-l)); top: calc(12px + var(--safe-t));
+      width: 116px; padding: 8px 12px;
+    }
+    #cp .lbl { font-size: 13px; font-weight: 900; font-style: italic; letter-spacing: 1px; }
+    #cp .lbl b { color: var(--accent); }
+    #cp-track { margin-top: 6px; height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+    #cp-fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: width .2s; }
+
+    /* --- ability (bottom-right, doubles as the touch button) --- */
+    #ability {
+      right: calc(20px + var(--safe-r)); bottom: calc(20px + var(--safe-b));
+      width: 152px; padding: 10px 12px 11px; text-align: center;
+      transition: filter .15s, border-color .15s, transform .1s;
+    }
+    #ability.out { filter: grayscale(1) brightness(.62); }
+    #ability.active { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255,209,46,.25); }
+    #ability-name { font-size: 17px; font-weight: 900; font-style: italic; letter-spacing: .5px; }
+    #ability .key { font-size: 9px; font-weight: 800; letter-spacing: 2px; opacity: .5; }
+    #ability-pips { display: flex; gap: 5px; justify-content: center; margin: 6px 0 0; }
+    #ability-pips i {
+      width: 20px; height: 8px; border-radius: 4px; background: rgba(255,255,255,.18); display: block;
+    }
+    #ability-pips i.on { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+    #ability-bar { margin-top: 6px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; opacity: 0; transition: opacity .15s; }
+    #ability.active #ability-bar { opacity: 1; }
+    #ability-bar i { display: block; height: 100%; width: 0%; background: var(--good); }
+
+    /* --- centre message --- */
+    #message {
+      position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%) scale(.6);
+      font-size: 120px; font-weight: 900; font-style: italic; letter-spacing: -5px; line-height: 1;
+      color: #fff; text-shadow: 0 8px 0 rgba(0,0,0,.3); opacity: 0;
+      transition: transform .18s cubic-bezier(.2,1.6,.5,1), opacity .18s;
+      white-space: nowrap;
+    }
+    #message.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    #message.count { color: var(--accent); }
+    #message.go { color: var(--good); }
+    #message.finish { color: var(--accent); font-size: 92px; letter-spacing: -3px; }
+
+    /* --- toast --- */
+    #toast {
+      position: absolute; left: 50%; bottom: 24%; transform: translateX(-50%) translateY(8px);
+      font-size: 19px; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      background: var(--panel2); border: 1px solid var(--line);
+      padding: 8px 22px; border-radius: 999px; white-space: nowrap;
+      opacity: 0; transition: opacity .25s, transform .25s;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* --- new best celebration --- */
+    #celebrate { position: absolute; inset: 0; display: none; overflow: hidden; }
+    #celebrate.show { display: block; }
+    #celebrate .banner {
+      position: absolute; left: 50%; top: 26%; transform: translate(-50%,-50%);
+      font-size: 46px; font-weight: 900; font-style: italic; letter-spacing: -1px;
+      color: #20143a; background: linear-gradient(90deg, var(--accent), var(--accent2));
+      padding: 10px 30px; border-radius: 18px; white-space: nowrap;
+      box-shadow: 0 10px 0 rgba(0,0,0,.3);
+      animation: best-pop .5s cubic-bezier(.2,1.7,.4,1) both, best-wob 1.1s .5s ease-in-out infinite;
+    }
+    @keyframes best-pop { 0% { transform: translate(-50%,-50%) scale(.2) rotate(-14deg); opacity: 0; } 100% { transform: translate(-50%,-50%) scale(1) rotate(-3deg); opacity: 1; } }
+    @keyframes best-wob { 50% { transform: translate(-50%,-50%) scale(1.05) rotate(3deg); } }
+    #celebrate .confetti { position: absolute; left: 50%; top: 26%; width: 0; height: 0; }
+    #celebrate .confetti i {
+      position: absolute; width: 12px; height: 18px; border-radius: 3px; opacity: 0;
+      animation: conf 1.5s ease-out forwards;
+    }
+    @keyframes conf {
+      0%   { opacity: 1; transform: translate(0,0) rotate(0deg) scale(1); }
+      100% { opacity: 0; transform: translate(var(--dx), var(--dy)) rotate(var(--rot)) scale(.5); }
+    }
+    #celebrate .confetti i:nth-child(1)  { background: var(--accent);  --dx: -240px; --dy: 340px; --rot: 420deg; animation-delay: .00s; }
+    #celebrate .confetti i:nth-child(2)  { background: var(--hot);     --dx:  210px; --dy: 300px; --rot:-380deg; animation-delay: .05s; }
+    #celebrate .confetti i:nth-child(3)  { background: var(--good);    --dx: -140px; --dy: 420px; --rot: 300deg; animation-delay: .10s; }
+    #celebrate .confetti i:nth-child(4)  { background: var(--accent2); --dx:  150px; --dy: 400px; --rot:-260deg; animation-delay: .15s; }
+    #celebrate .confetti i:nth-child(5)  { background: #6ad0ff;        --dx:  -60px; --dy: 460px; --rot: 500deg; animation-delay: .20s; }
+    #celebrate .confetti i:nth-child(6)  { background: var(--accent);  --dx:   70px; --dy: 470px; --rot:-440deg; animation-delay: .25s; }
+    #celebrate .confetti i:nth-child(7)  { background: var(--hot);     --dx: -320px; --dy: 260px; --rot: 340deg; animation-delay: .30s; }
+    #celebrate .confetti i:nth-child(8)  { background: var(--good);    --dx:  300px; --dy: 250px; --rot:-320deg; animation-delay: .35s; }
+    #celebrate .confetti i:nth-child(9)  { background: #b980ff;        --dx: -200px; --dy: 200px; --rot: 260deg; animation-delay: .40s; }
+    #celebrate .confetti i:nth-child(10) { background: var(--accent2); --dx:  190px; --dy: 190px; --rot:-500deg; animation-delay: .45s; }
+    #celebrate .confetti i:nth-child(11) { background: #6ad0ff;        --dx:  -90px; --dy: 220px; --rot: 380deg; animation-delay: .50s; }
+    #celebrate .confetti i:nth-child(12) { background: var(--accent);  --dx:  100px; --dy: 230px; --rot:-300deg; animation-delay: .55s; }
+
+    /* ================================ MENU =============================== */
+    #menu {
+      position: fixed; inset: 0; z-index: 10; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      background:
+        radial-gradient(120% 80% at 50% -10%, rgba(255,122,26,.30), rgba(0,0,0,0) 60%),
+        radial-gradient(100% 70% at 50% 110%, rgba(90,60,220,.35), rgba(0,0,0,0) 60%),
+        rgba(9, 8, 26, 0.90);
+      transition: opacity .35s;
+    }
+    #menu.hidden { display: none !important; }
+    .menu-inner {
+      min-height: 100%;
+      display: flex; flex-direction: column; align-items: center; gap: 18px;
+      padding: calc(20px + var(--safe-t)) calc(16px + var(--safe-r)) calc(28px + var(--safe-b)) calc(16px + var(--safe-l));
+      max-width: 940px; margin: 0 auto;
+    }
+    #menu h1 {
+      font-size: 68px; font-weight: 900; font-style: italic; letter-spacing: -4px;
+      line-height: .92; text-align: center; text-transform: uppercase;
+      text-shadow: 0 7px 0 rgba(0,0,0,.35);
+    }
+    #menu h1 span { color: var(--accent); }
+    #menu .tag { font-size: 11px; letter-spacing: 5px; font-weight: 800; opacity: .6; text-align: center; margin-top: 8px; text-transform: uppercase; }
+    #menu .credit { font-size: 12px; font-weight: 800; letter-spacing: 2px; text-align: center; margin-top: 6px; color: var(--accent2); }
+
+    .menu-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+    .balance {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 999px;
+      padding: 8px 18px; font-size: 20px; font-weight: 900; font-style: italic;
+      color: var(--accent); font-variant-numeric: tabular-nums; min-height: 44px;
+    }
+    .balance .cap { font-size: 9px; letter-spacing: 2px; color: var(--ink); opacity: .5; font-style: normal; }
+    .icon-btn {
+      pointer-events: auto; display: flex; align-items: center; gap: 7px;
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 999px;
+      padding: 10px 16px; min-height: 44px;
+      font-size: 11px; font-weight: 900; letter-spacing: 1.5px;
+    }
+    .icon-btn.on { border-color: var(--accent); color: var(--accent); }
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    .sec { width: 100%; }
+    .sec h2 {
+      font-size: 12px; font-weight: 900; letter-spacing: 4px; opacity: .55;
+      text-transform: uppercase; margin: 0 0 10px 4px;
+    }
+
+    /* --- track chips --- */
+    #track-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 10px; }
+    .track-chip {
+      pointer-events: auto; text-align: left; cursor: pointer;
+      background: var(--panel); border: 2px solid var(--line); border-radius: 16px;
+      padding: 11px 14px; min-height: 74px;
+      transition: border-color .15s, transform .12s, background .15s;
+    }
+    .track-chip .nm { font-size: 17px; font-weight: 900; font-style: italic; letter-spacing: -.3px; }
+    .track-chip .ty { font-size: 10px; font-weight: 700; letter-spacing: .6px; opacity: .55; margin-top: 2px; line-height: 1.35; }
+    .track-chip .bt { font-size: 12px; font-weight: 900; letter-spacing: 1px; margin-top: 6px; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .track-chip .bt em { font-style: normal; font-size: 9px; letter-spacing: 2px; opacity: .5; color: var(--ink); margin-right: 5px; }
+    .track-chip.selected { border-color: var(--accent); background: rgba(255,209,46,.12); transform: translateY(-3px); }
+
+    /* --- car cards --- */
+    #car-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); gap: 10px; }
+    .car-card {
+      position: relative; text-align: left;
+      background: var(--panel); border: 2px solid var(--line); border-radius: 18px;
+      padding: 12px; display: flex; flex-direction: column; gap: 8px;
+      transition: border-color .15s, transform .12s, background .15s;
+    }
+    .car-card.selected { border-color: var(--accent); background: rgba(255,209,46,.10); transform: translateY(-3px); }
+    .car-card.locked { opacity: .92; }
+    .car-pick { pointer-events: auto; cursor: pointer; display: flex; flex-direction: column; gap: 7px; text-align: left; }
+    .car-head { display: flex; align-items: center; gap: 9px; }
+    .car-swatch {
+      width: 44px; height: 30px; border-radius: 9px; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: inset 0 -8px 0 rgba(0,0,0,.22), 0 2px 0 rgba(0,0,0,.3);
+    }
+    .car-swatch svg { width: 34px; height: 20px; }
+    .car-name { font-size: 18px; font-weight: 900; font-style: italic; letter-spacing: -.4px; }
+    .car-ability { font-size: 11px; font-weight: 900; letter-spacing: 1px; color: var(--accent); }
+    .car-blurb { font-size: 10px; font-weight: 700; opacity: .55; line-height: 1.4; }
+    .stat { display: flex; align-items: center; gap: 7px; }
+    .stat .n { font-size: 9px; width: 42px; letter-spacing: 1px; opacity: .5; font-weight: 800; text-transform: uppercase; }
+    .stat .bar { flex: 1; height: 5px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; }
+    .stat .bar i { display: block; height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+    .car-foot { margin-top: auto; }
+    .owned-tag {
+      display: block; text-align: center; font-size: 10px; font-weight: 900; letter-spacing: 2px;
+      padding: 9px 0; border-radius: 999px; background: rgba(255,255,255,.08); opacity: .65;
+    }
+    .car-card.selected .owned-tag { background: linear-gradient(90deg, var(--accent), var(--accent2)); color: #20143a; opacity: 1; }
+    .buy-btn {
+      pointer-events: auto; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;
+      font-size: 13px; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      color: #20143a; background: linear-gradient(180deg, var(--accent), #ffa519);
+      border-radius: 999px; padding: 0 12px; min-height: 44px;
+      box-shadow: 0 4px 0 rgba(0,0,0,.3);
+    }
+    .buy-btn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+    .buy-btn:disabled { filter: grayscale(1) brightness(.62); cursor: default; box-shadow: none; }
+
+    .controls-hint {
+      font-size: 11px; letter-spacing: .6px; opacity: .6; font-weight: 700;
+      text-align: center; line-height: 2; max-width: 620px;
+    }
+    .controls-hint b { color: var(--accent); font-weight: 900; }
+    .kbd { display: inline-block; padding: 1px 7px; border-radius: 6px; background: rgba(255,255,255,.12); font-weight: 900; color: var(--accent); }
+
+    /* ============================== RESULTS ============================== */
+    #results {
+      position: fixed; inset: 0; z-index: 11; overflow-y: auto; -webkit-overflow-scrolling: touch;
+      background: radial-gradient(100% 80% at 50% 0%, rgba(255,122,26,.25), rgba(0,0,0,0) 60%), rgba(9, 8, 26, 0.88);
+    }
+    #results.hidden { display: none !important; }
+    .results-inner {
+      min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+      padding: calc(24px + var(--safe-t)) 18px calc(28px + var(--safe-b));
+    }
+    #results h2 {
+      font-size: 62px; font-weight: 900; font-style: italic; letter-spacing: -3px;
+      color: var(--accent); text-shadow: 0 7px 0 rgba(0,0,0,.3); text-align: center;
+    }
+    #results h2.newbest { background: linear-gradient(90deg, var(--accent), var(--hot)); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; }
+    .res-card {
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 20px;
+      padding: 16px 22px; display: grid; grid-template-columns: auto auto; gap: 8px 28px; align-items: baseline;
+      min-width: 280px;
+    }
+    .res-card .k { font-size: 10px; font-weight: 900; letter-spacing: 2px; opacity: .5; text-transform: uppercase; }
+    .res-card .v { font-size: 24px; font-weight: 900; font-style: italic; text-align: right; font-variant-numeric: tabular-nums; }
+    .res-card .v.hl { color: var(--accent); }
+    .res-btns { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+    /* =========================== TOUCH CONTROLS ========================== */
+    #touch-controls { display: none; position: fixed; inset: 0; pointer-events: none; z-index: 5; }
+    .tc-btn {
+      pointer-events: auto; position: absolute; touch-action: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; flex-direction: column;
+      border-radius: 50%; font-weight: 900; font-style: italic; letter-spacing: 1px;
+      background: var(--panel2); border: 3px solid var(--line); color: var(--ink);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      transition: background .08s, border-color .08s, transform .08s;
+    }
+    .tc-btn.held { transform: scale(.94); }
+    #btn-gas {
+      right: calc(18px + var(--safe-r)); bottom: calc(18px + var(--safe-b));
+      width: 116px; height: 116px; font-size: 22px;
+      background: linear-gradient(180deg, rgba(255,209,46,.9), rgba(255,122,26,.9)); color: #20143a; border-color: rgba(255,255,255,.35);
+    }
+    #btn-gas.held { background: linear-gradient(180deg, #fff0a8, var(--accent)); }
+    #btn-brake {
+      right: calc(146px + var(--safe-r)); bottom: calc(22px + var(--safe-b));
+      width: 78px; height: 78px; font-size: 13px;
+    }
+    #btn-brake.held { background: rgba(255,92,92,.5); border-color: var(--bad); }
+    #btn-left, #btn-right {
+      bottom: calc(18px + var(--safe-b)); width: 88px; height: 88px; font-size: 30px;
+    }
+    #btn-left  { left: calc(18px + var(--safe-l)); }
+    #btn-right { left: calc(116px + var(--safe-l)); }
+    #btn-left.held, #btn-right.held { background: rgba(255,209,46,.32); border-color: var(--accent); color: var(--accent); }
+
+    .touch-only { display: none; }
+    body.touch #touch-controls { display: block; }
+    body.touch .touch-only { display: inline; }
+    body.touch .kbd-only { display: none; }
+    /* tilt steering on → hide the on-screen steer buttons */
+    body.tilt-on #btn-left, body.tilt-on #btn-right { display: none; }
+    /* keep the HUD clear of the touch buttons */
+    body.touch #speedo {
+      left: calc(14px + var(--safe-l)); bottom: calc(118px + var(--safe-b));
+      width: 132px; padding: 6px 10px 8px;
+    }
+    body.touch.tilt-on #speedo { bottom: calc(20px + var(--safe-b)); }
+    body.touch #speed-val { font-size: 30px; }
+    body.touch #ability {
+      right: calc(14px + var(--safe-r)); bottom: calc(146px + var(--safe-b));
+      width: 132px; padding: 8px 10px 9px;
+    }
+    body.touch #ability .key { display: none; }
+    body.touch #ability:active { transform: scale(.96); }
+    body.touch #ability:not(.out) { cursor: pointer; }
+    #hud.visible #ability { pointer-events: none; }
+    body.touch #hud.visible #ability { pointer-events: auto; touch-action: none; }
+
+    /* ============================ TILT PROMPT ============================ */
+    #tilt-prompt {
+      position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+      padding: 24px; background: rgba(6, 5, 18, 0.82);
+    }
+    #tilt-prompt.hidden { display: none !important; }
+    .tilt-card {
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 24px;
+      padding: 26px 24px; max-width: 380px; width: 100%; text-align: center;
+      display: flex; flex-direction: column; align-items: center; gap: 14px;
+      box-shadow: 0 18px 40px rgba(0,0,0,.5);
+    }
+    .tilt-card svg { width: 86px; height: 62px; }
+    .tilt-card h3 { font-size: 25px; font-weight: 900; font-style: italic; letter-spacing: -.5px; line-height: 1.1; }
+    .tilt-card p { font-size: 12px; font-weight: 700; opacity: .6; line-height: 1.6; }
+    .tilt-btns { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; width: 100%; }
+    .tilt-btns .btn { flex: 1; padding: 14px 18px; font-size: 15px; min-width: 120px; }
+
+    /* ============================ small phones =========================== */
+    @media (max-width: 520px) {
+      #menu h1 { font-size: 46px; letter-spacing: -2.5px; }
+      #track-list { grid-template-columns: 1fr 1fr; gap: 8px; }
+      #car-list { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .track-chip { padding: 9px 11px; min-height: 68px; }
+      .track-chip .nm { font-size: 15px; }
+      .car-name { font-size: 16px; }
+      #message { font-size: 78px; letter-spacing: -3px; }
+      #message.finish { font-size: 54px; }
+      #toast { font-size: 15px; padding: 7px 16px; }
+      #results h2 { font-size: 42px; }
+      #celebrate .banner { font-size: 27px; padding: 8px 18px; }
+      #time-val { font-size: 27px; }
+      #timer { min-width: 140px; padding: 7px 12px; }
+    }
+    /* landscape phone: everything gets shorter */
+    @media (max-height: 460px) {
+      #menu h1 { font-size: 38px; }
+      .menu-inner { gap: 12px; }
+      #message { font-size: 62px; }
+      #message.finish { font-size: 44px; }
+      #results h2 { font-size: 36px; }
+      .results-inner { gap: 12px; }
+      .res-card .v { font-size: 19px; }
+      #btn-gas { width: 92px; height: 92px; font-size: 18px; }
+      #btn-brake { width: 66px; height: 66px; right: calc(120px + var(--safe-r)); }
+      #btn-left, #btn-right { width: 72px; height: 72px; }
+      #btn-right { left: calc(98px + var(--safe-l)); }
+      body.touch #speedo { bottom: calc(100px + var(--safe-b)); width: 118px; }
+      body.touch #ability { bottom: calc(120px + var(--safe-b)); width: 118px; }
+      #cp { width: 96px; }
+      #celebrate .banner { top: 20%; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- ================================ HUD ================================ -->
+  <div class="overlay" id="hud">
+    <div class="hud-panel" id="cp">
+      <div class="lbl">CP <b id="cp-val">0/6</b></div>
+      <div id="cp-track"><div id="cp-fill"></div></div>
+    </div>
+
+    <div class="hud-panel" id="timer">
+      <div id="time-val">0:00.00</div>
+      <div class="row">
+        <span id="best-val">BEST --:--.--</span>
+        <span id="ghost-delta"></span>
+      </div>
+    </div>
+
+    <div class="hud-panel" id="coins-hud">
+      <div class="run">
+        <svg class="coin-ico" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="10" fill="#ffd12e" stroke="#b87b12" stroke-width="2"/>
+          <circle cx="12" cy="12" r="6" fill="none" stroke="#b87b12" stroke-width="1.6"/>
+          <path d="M8.5 8.2 A6 6 0 0 1 14 6.6" fill="none" stroke="#fff5c0" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span id="coins-run">0</span>
+      </div>
+      <div class="bank">BANK <span id="coins-banked">0</span></div>
+    </div>
+
+    <div class="hud-panel" id="speedo">
+      <svg viewBox="0 0 100 62" aria-hidden="true">
+        <path d="M10 50 A40 40 0 0 1 90 50" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="9" stroke-linecap="round"/>
+        <path id="gauge-fill" d="M10 50 A40 40 0 0 1 90 50" pathLength="100" fill="none"
+              stroke="url(#gauge-grad)" stroke-width="9" stroke-linecap="round"
+              stroke-dasharray="100 100" stroke-dashoffset="100"/>
+        <defs>
+          <linearGradient id="gauge-grad" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#ffd12e"/>
+            <stop offset="60%" stop-color="#ff7a1a"/>
+            <stop offset="100%" stop-color="#ff2e6a"/>
+          </linearGradient>
+        </defs>
+        <g id="gauge-needle">
+          <line x1="50" y1="50" x2="50" y2="18" stroke="#fff6e8" stroke-width="3.4" stroke-linecap="round"/>
+        </g>
+        <circle cx="50" cy="50" r="4.5" fill="#fff6e8"/>
+      </svg>
+      <div class="read"><span id="speed-val">0</span><span class="unit">MPH</span></div>
+    </div>
+
+    <div class="hud-panel" id="ability">
+      <div id="ability-name">Boost</div>
+      <div class="key">SPACE</div>
+      <div id="ability-pips"><i></i><i></i><i></i></div>
+      <div id="ability-bar"><i></i></div>
+    </div>
+
+    <div id="message"></div>
+    <div id="toast"></div>
+    <div id="celebrate">
+      <div class="banner">NEW BEST TIME!</div>
+      <div class="confetti">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ TOUCH CONTROLS ========================= -->
+  <div id="touch-controls">
+    <button class="tc-btn" id="btn-left" aria-label="steer left">&#9664;</button>
+    <button class="tc-btn" id="btn-right" aria-label="steer right">&#9654;</button>
+    <button class="tc-btn" id="btn-brake" aria-label="brake">BRAKE</button>
+    <button class="tc-btn" id="btn-gas" aria-label="gas">GAS</button>
+  </div>
+
+  <!-- ================================ MENU =============================== -->
+  <div id="menu">
+    <div class="menu-inner">
+      <div>
+        <h1>NITRO <span>RACING</span></h1>
+        <div class="tag">beat the clock &middot; grab the coins</div>
+        <div class="credit">DESIGNED BY ALEX</div>
+      </div>
+
+      <div class="menu-bar">
+        <div class="balance">
+          <svg class="coin-ico" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="#ffd12e" stroke="#b87b12" stroke-width="2"/>
+            <circle cx="12" cy="12" r="6" fill="none" stroke="#b87b12" stroke-width="1.6"/>
+            <path d="M8.5 8.2 A6 6 0 0 1 14 6.6" fill="none" stroke="#fff5c0" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span id="menu-coins">0</span>
+          <span class="cap">COINS</span>
+        </div>
+        <button class="icon-btn" id="mute-btn" aria-label="toggle sound">
+          <svg id="mute-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4 9h4l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/>
+            <g id="mute-on-waves"><path d="M16.5 8.5a5 5 0 0 1 0 7"/><path d="M19 6a8.5 8.5 0 0 1 0 12"/></g>
+            <g id="mute-off-x" style="display:none"><path d="M17 9.5l4 5"/><path d="M21 9.5l-4 5"/></g>
+          </svg>
+          <span id="mute-label">SOUND ON</span>
+        </button>
+        <button class="icon-btn touch-only" id="tilt-btn" aria-label="toggle tilt steering">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="7" y="2.5" width="10" height="19" rx="2.5" transform="rotate(16 12 12)"/>
+            <path d="M2.5 17a5 5 0 0 1 2-4"/><path d="M21.5 17a5 5 0 0 0-2-4"/>
+          </svg>
+          <span id="tilt-label">TILT OFF</span>
+        </button>
+      </div>
+
+      <div class="sec">
+        <h2>Track</h2>
+        <div id="track-list"></div>
+      </div>
+
+      <div class="sec">
+        <h2>Garage</h2>
+        <div id="car-list"></div>
+      </div>
+
+      <button class="btn huge" id="race-btn">RACE &#9656;</button>
+
+      <div class="controls-hint">
+        <span class="kbd-only">
+          <span class="kbd">&#9664;</span> <span class="kbd">&#9654;</span> or <span class="kbd">A</span> <span class="kbd">D</span> steer &nbsp;&middot;&nbsp;
+          <span class="kbd">&#9650;</span>/<span class="kbd">W</span> gas &nbsp;&middot;&nbsp;
+          <span class="kbd">&#9660;</span>/<span class="kbd">S</span> brake<br/>
+          <span class="kbd">SPACE</span> special ability &nbsp;&middot;&nbsp;
+          <span class="kbd">R</span> restart &nbsp;&middot;&nbsp;
+          <span class="kbd">M</span> mute
+        </span>
+        <span class="touch-only">
+          <b>TILT</b> the phone to steer (or the <b>&#9664; &#9654;</b> buttons)<br/>
+          <b>GAS</b> to go &nbsp;&middot;&nbsp; <b>BRAKE</b> to slow &nbsp;&middot;&nbsp; tap the <b>ability panel</b> for your power
+        </span><br/>
+        Hit all 6 checkpoints, grab coins, buy faster cars.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================== RESULTS ============================== -->
+  <div id="results" class="hidden">
+    <div class="results-inner">
+      <h2 id="results-title">FINISH!</h2>
+      <div class="res-card">
+        <span class="k">Your time</span><span class="v hl" id="res-time">0:00.00</span>
+        <span class="k">Best time</span><span class="v" id="res-best">--:--.--</span>
+        <span class="k">Coins this run</span><span class="v" id="res-coins">0</span>
+        <span class="k">Total banked</span><span class="v" id="res-banked">0</span>
+      </div>
+      <div class="res-btns">
+        <button class="btn" id="again-btn">RACE AGAIN</button>
+        <button class="btn ghost" id="menu-btn">MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================ TILT PROMPT ============================ -->
+  <div id="tilt-prompt" class="hidden">
+    <div class="tilt-card">
+      <svg viewBox="0 0 120 86" fill="none" stroke="#ffd12e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="44" y="10" width="32" height="60" rx="7" transform="rotate(18 60 40)"/>
+        <path d="M14 62a26 26 0 0 1 10-20" />
+        <path d="M106 62a26 26 0 0 0-10-20" />
+        <path d="M8 74h14M98 74h14" stroke="#ff7a1a"/>
+      </svg>
+      <h3>Steer by tilting your phone?</h3>
+      <p>Tilt the phone left and right to turn. You can change this any time from the menu.</p>
+      <div class="tilt-btns">
+        <button class="btn" id="tilt-yes">ENABLE</button>
+        <button class="btn ghost" id="tilt-no">NO THANKS</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
