@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f1c" />
+  <meta name="description" content="Slam Trunk — 3D elephant basketball. Peanuts, trunks and giant peanut bowls. Designed by Anya." />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Slam Trunk</title>
+  <style>
+    :root {
+      --gold:   #ffd12e;
+      --gold2:  #ffa519;
+      --gray:   #9e9e9e;
+      --navy:   #1a3a8f;
+      --good:   #4dffa6;
+      --bad:    #ff5c5c;
+      --ink:    #fff6e8;
+      --panel:  rgba(0, 0, 0, 0.55);
+      --panel2: rgba(14, 16, 34, 0.92);
+      --line:   rgba(255, 255, 255, 0.14);
+      --safe-t: env(safe-area-inset-top, 0px);
+      --safe-b: env(safe-area-inset-bottom, 0px);
+      --safe-l: env(safe-area-inset-left, 0px);
+      --safe-r: env(safe-area-inset-right, 0px);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0f1c; }
+    body {
+      font-family: "Avenir Next", "Segoe UI", system-ui, -apple-system, sans-serif;
+      color: var(--ink);
+      user-select: none; -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+    #app { position: fixed; inset: 0; touch-action: none; }
+    #app canvas { display: block; touch-action: none; }
+    button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+    [hidden] { display: none !important; }
+
+    /* ============================ shared buttons ========================= */
+    .btn {
+      font-weight: 900; letter-spacing: .5px; text-align: center;
+      color: #241a05; background: linear-gradient(180deg, var(--gold), var(--gold2));
+      border-radius: 999px; padding: 15px 30px; font-size: 19px;
+      min-height: 58px; min-width: 132px;
+      box-shadow: 0 6px 0 rgba(0,0,0,.35);
+      transition: transform .1s, filter .1s;
+    }
+    .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+    .btn:disabled { filter: grayscale(.9) brightness(.62); cursor: default; box-shadow: none; }
+    .btn.ghost {
+      color: var(--ink); background: var(--panel2);
+      border: 2px solid var(--line); box-shadow: 0 6px 0 rgba(0,0,0,.3);
+    }
+    .btn.huge { font-size: 24px; padding: 18px 44px; min-height: 66px; }
+    .btn.small { font-size: 14px; padding: 11px 20px; min-height: 46px; min-width: 0; }
+    .btn .sub { display: block; font-size: 12px; font-weight: 800; opacity: .75; letter-spacing: 1px; margin-top: 2px; }
+    .btn-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+
+    .sheet {
+      position: fixed; inset: 0; z-index: 10;
+      overflow-y: auto; -webkit-overflow-scrolling: touch;
+    }
+    .sheet-inner {
+      min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 16px; text-align: center;
+      padding: calc(20px + var(--safe-t)) calc(16px + var(--safe-r)) calc(24px + var(--safe-b)) calc(16px + var(--safe-l));
+      max-width: 720px; margin: 0 auto;
+    }
+
+    /* ================================ HUD ================================ */
+    #hud { position: fixed; inset: 0; z-index: 4; pointer-events: none; }
+
+    #scores {
+      position: absolute; left: 50%; top: calc(12px + var(--safe-t)); transform: translateX(-50%);
+      display: flex; gap: 10px;
+    }
+    .pill {
+      background: var(--panel); border-radius: 14px; padding: 6px 16px; min-width: 78px;
+      text-align: center; font-weight: 900;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    .pill small { display: block; font-size: 10px; opacity: .8; letter-spacing: 1.5px; }
+    .pill b { font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .pill.p { border-left: 8px solid var(--gray); }
+    .pill.e { border-left: 8px solid var(--navy); }
+    .pill.timer b { color: var(--gold); }
+    .pill.timer.low b { color: var(--bad); animation: tick-pulse .5s ease-in-out infinite; }
+    @keyframes tick-pulse { 50% { transform: scale(1.14); } }
+
+    #tag {
+      position: absolute; left: calc(12px + var(--safe-l)); top: calc(12px + var(--safe-t));
+      background: var(--panel); border-radius: 16px; padding: 9px 14px;
+      font-weight: 900; font-size: 14px; max-width: 42vw;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #hud-right {
+      position: absolute; right: calc(12px + var(--safe-r)); top: calc(12px + var(--safe-t));
+      display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+    }
+    #coins {
+      background: var(--panel); border-radius: 20px; padding: 9px 16px;
+      font-weight: 900; font-size: 19px; color: var(--gold);
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #mute {
+      pointer-events: auto;
+      width: 48px; height: 48px; border-radius: 50%; font-size: 21px; line-height: 1;
+      background: var(--panel); border: 2px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    }
+    #mute:active { transform: scale(.92); }
+
+    #countdown {
+      position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%) scale(.4);
+      font-size: clamp(90px, 26vmin, 190px); font-weight: 900; letter-spacing: -6px; line-height: 1;
+      color: var(--gold); text-shadow: 0 8px 0 rgba(0,0,0,.35); opacity: 0;
+      white-space: nowrap;
+    }
+    #countdown.go { color: var(--good); letter-spacing: -2px; }
+    #countdown.pop { animation: count-pop .9s cubic-bezier(.15,1.5,.4,1) both; }
+    @keyframes count-pop {
+      0%   { opacity: 0; transform: translate(-50%,-50%) scale(.3) rotate(-10deg); }
+      22%  { opacity: 1; transform: translate(-50%,-50%) scale(1.12) rotate(2deg); }
+      55%  { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0deg); }
+      100% { opacity: 0; transform: translate(-50%,-50%) scale(1.5) rotate(0deg); }
+    }
+
+    #flash {
+      position: absolute; left: 50%; top: 27%; transform: translate(-50%, -50%) scale(.5);
+      font-size: clamp(28px, 8vmin, 56px); font-weight: 900; letter-spacing: -1px; line-height: 1.1;
+      text-shadow: 0 5px 0 rgba(0,0,0,.35); opacity: 0; white-space: nowrap;
+      color: var(--gold);
+    }
+    #flash.good { color: var(--gold); }
+    #flash.bad  { color: var(--bad); }
+    #flash.neutral { color: var(--ink); }
+    #flash.pop { animation: flash-pop 1.15s cubic-bezier(.15,1.5,.4,1) both; }
+    @keyframes flash-pop {
+      0%   { opacity: 0; transform: translate(-50%,-50%) scale(.4) rotate(-6deg); }
+      18%  { opacity: 1; transform: translate(-50%,-50%) scale(1.14) rotate(3deg); }
+      45%  { opacity: 1; transform: translate(-50%,-50%) scale(1) rotate(0deg); }
+      100% { opacity: 0; transform: translate(-50%,-50%) scale(1.05) translateY(-40px); }
+    }
+
+    #hint {
+      position: absolute; left: 50%; bottom: calc(16px + var(--safe-b)); transform: translateX(-50%);
+      background: var(--panel); border-radius: 999px; padding: 9px 20px;
+      font-size: 15px; font-weight: 800; white-space: nowrap; max-width: calc(100% - 32px);
+      overflow: hidden; text-overflow: ellipsis;
+      backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+      transition: opacity .25s;
+    }
+    #hint:empty { opacity: 0; }
+
+    /* ================================ MENU =============================== */
+    #menu {
+      background:
+        radial-gradient(120% 80% at 50% -10%, rgba(255,209,46,.26), rgba(0,0,0,0) 60%),
+        radial-gradient(100% 70% at 50% 110%, rgba(26,58,143,.45), rgba(0,0,0,0) 62%),
+        rgba(7, 9, 22, 0.92);
+    }
+    #menu h1 {
+      font-size: clamp(44px, 15vmin, 96px); font-weight: 900; letter-spacing: -3px; line-height: .92;
+      text-transform: uppercase; text-shadow: 0 7px 0 rgba(0,0,0,.38);
+    }
+    #menu h1 .gold { color: var(--gold); }
+    #menu h1 .emo { display: block; font-size: .55em; letter-spacing: 0; margin-top: 6px; }
+    .subtitle { font-size: clamp(13px, 3.4vmin, 17px); font-weight: 800; opacity: .72; line-height: 1.5; max-width: 30ch; }
+    .credit { font-size: 12px; font-weight: 900; letter-spacing: 2.5px; text-transform: uppercase; color: var(--gold); opacity: .85; }
+    .round-tag {
+      font-size: 12px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase;
+      background: rgba(255,209,46,.16); border: 2px solid rgba(255,209,46,.5); color: var(--gold);
+      border-radius: 999px; padding: 6px 16px;
+    }
+    .balance {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 999px;
+      padding: 9px 20px; font-size: 20px; font-weight: 900; color: var(--gold);
+      font-variant-numeric: tabular-nums; min-height: 46px;
+    }
+    .balance .cap { font-size: 9px; letter-spacing: 2px; color: var(--ink); opacity: .5; }
+    .howto {
+      background: rgba(255,255,255,.06); border: 2px solid var(--line); border-radius: 18px;
+      padding: 14px 18px; max-width: 420px;
+      display: flex; flex-direction: column; gap: 8px;
+      font-size: 14px; font-weight: 700; line-height: 1.45; text-align: left;
+    }
+    .howto h2 { font-size: 11px; font-weight: 900; letter-spacing: 3px; text-transform: uppercase; opacity: .55; text-align: center; }
+    .howto div { display: flex; gap: 9px; align-items: baseline; }
+    .howto span { flex: none; width: 1.4em; text-align: center; font-size: 17px; }
+    .howto b { color: var(--gold); font-weight: 900; }
+    #reset-btn {
+      font-size: 12px; font-weight: 900; letter-spacing: 1.5px; text-transform: uppercase;
+      opacity: .5; padding: 12px 18px; min-height: 44px; border-radius: 999px;
+    }
+    #reset-btn.armed { opacity: 1; color: var(--bad); background: rgba(255,92,92,.14); }
+
+    /* ============================== RESULT =============================== */
+    #result { background: radial-gradient(110% 80% at 50% 0%, rgba(255,209,46,.24), rgba(0,0,0,0) 62%), rgba(7, 9, 22, 0.9); }
+    #result h2 {
+      font-size: clamp(38px, 11vmin, 72px); font-weight: 900; letter-spacing: -2px; line-height: 1;
+      text-shadow: 0 7px 0 rgba(0,0,0,.32);
+    }
+    #result h2.win { color: var(--gold); animation: win-wob 1.4s ease-in-out infinite; }
+    #result h2.lose { color: var(--ink); opacity: .9; }
+    @keyframes win-wob { 0%,100% { transform: rotate(-2deg) scale(1); } 50% { transform: rotate(2deg) scale(1.04); } }
+    .final {
+      display: flex; align-items: stretch; gap: 10px;
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 20px; padding: 14px 18px;
+    }
+    .final .side { min-width: 96px; }
+    .final .who { font-size: 11px; font-weight: 900; letter-spacing: 2px; opacity: .6; }
+    .final .num { font-size: 44px; font-weight: 900; line-height: 1.05; font-variant-numeric: tabular-nums; }
+    .final .side.p .num { color: var(--gray); }
+    .final .side.e .num { color: #6f92e8; }
+    .final .vs { align-self: center; font-size: 13px; font-weight: 900; opacity: .4; letter-spacing: 1px; }
+    .coin-line { font-size: 20px; font-weight: 900; color: var(--gold); }
+    .next-line { font-size: clamp(15px, 4vmin, 20px); font-weight: 800; opacity: .85; }
+
+    /* =============================== SHOP ================================ */
+    #shop { background: radial-gradient(110% 80% at 50% 0%, rgba(255,209,46,.2), rgba(0,0,0,0) 62%), rgba(7, 9, 22, 0.94); }
+    #shop .sheet-inner { justify-content: flex-start; max-width: 760px; }
+    #shop h2 { font-size: clamp(28px, 8vmin, 44px); font-weight: 900; letter-spacing: -1px; }
+    #shop-note { font-size: 12px; font-weight: 800; opacity: .55; letter-spacing: .5px; }
+    #shop-grid {
+      width: 100%; display: grid; gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+    }
+    .tile {
+      background: var(--panel2); border: 2px solid var(--line); border-radius: 20px;
+      padding: 12px 10px 10px; display: flex; flex-direction: column; align-items: center; gap: 7px;
+      transition: border-color .15s, background .15s, transform .12s;
+    }
+    .tile.worn { border-color: var(--gold); background: rgba(255,209,46,.13); transform: translateY(-3px); }
+    .tile .emo { font-size: 44px; line-height: 1.1; }
+    .tile .label { font-size: 14px; font-weight: 900; letter-spacing: -.2px; }
+    .tile .act {
+      width: 100%; min-height: 46px; border-radius: 999px; padding: 10px 8px;
+      font-size: 13px; font-weight: 900; letter-spacing: 1px; margin-top: auto;
+      color: #241a05; background: linear-gradient(180deg, var(--gold), var(--gold2));
+      box-shadow: 0 4px 0 rgba(0,0,0,.3);
+    }
+    .tile .act:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.3); }
+    .tile .act:disabled { filter: grayscale(1) brightness(.6); cursor: default; box-shadow: none; }
+    .tile .act.wear { color: var(--ink); background: rgba(255,255,255,.1); box-shadow: none; border: 2px solid var(--line); }
+    .tile.worn .act.wear { color: #241a05; background: linear-gradient(180deg, var(--gold), var(--gold2)); border-color: transparent; }
+
+    /* ====================== short-landscape squeeze ====================== */
+    @media (orientation: landscape) and (max-height: 560px) {
+      .sheet-inner { gap: 10px; padding-top: calc(12px + var(--safe-t)); padding-bottom: calc(14px + var(--safe-b)); }
+      #menu h1 { font-size: clamp(34px, 11vmin, 60px); }
+      #menu h1 .emo { display: inline; font-size: .8em; margin: 0; }
+      .howto { font-size: 13px; padding: 10px 14px; gap: 5px; }
+      .btn.huge { font-size: 20px; min-height: 58px; padding: 14px 34px; }
+      .final .num { font-size: 34px; }
+      .tile .emo { font-size: 34px; }
+      #scores .pill b { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- ================================= HUD ============================== -->
+  <div id="hud" hidden>
+    <div id="tag">🎪 Circus Tent</div>
+    <div id="hud-right">
+      <div id="coins">🪙 0</div>
+      <button id="mute" type="button" aria-label="Sound on or off">🔊</button>
+    </div>
+    <div id="scores">
+      <div class="pill p"><small>PEANUT</small><b id="score-p">0</b></div>
+      <div class="pill timer" id="timer-pill"><small>TIME</small><b id="time-val">1:00</b></div>
+      <div class="pill e"><small>ELLIE</small><b id="score-e">0</b></div>
+    </div>
+    <div id="countdown"></div>
+    <div id="flash"></div>
+    <div id="hint"></div>
+  </div>
+
+  <!-- ================================ MENU ============================= -->
+  <div id="menu" class="sheet" hidden>
+    <div class="sheet-inner">
+      <h1>Slam <span class="gold">Trunk</span><span class="emo">🐘🥜</span></h1>
+      <p class="subtitle">Peanut the elephant shoots peanuts with his trunk. Beat Ellie in 60 seconds!</p>
+      <div class="round-tag" id="menu-round" hidden>Round 2</div>
+      <div class="balance"><span class="cap">COINS</span>🪙 <span id="menu-coins">0</span></div>
+      <button class="btn huge" id="play-btn" type="button">Play</button>
+      <div class="howto">
+        <h2>How to play</h2>
+        <div><span>👉</span><div><b>Drag</b> to aim your shot.</div></div>
+        <div><span>🥜</span><div><b>Let go</b> to shoot the peanut in the bowl.</div></div>
+        <div><span>🐘</span><div><b>Tap</b> to jump up and block Ellie!</div></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost small" id="menu-shop-btn" type="button">🥜 Shop</button>
+        <button id="reset-btn" type="button">Reset progress</button>
+      </div>
+      <p class="credit">Designed by Anya</p>
+    </div>
+  </div>
+
+  <!-- =============================== RESULT ============================ -->
+  <div id="result" class="sheet" hidden>
+    <div class="sheet-inner">
+      <h2 id="result-title">You win! 🏆</h2>
+      <div class="final">
+        <div class="side p"><div class="who">PEANUT</div><div class="num" id="final-p">0</div></div>
+        <div class="vs">VS</div>
+        <div class="side e"><div class="who">ELLIE</div><div class="num" id="final-e">0</div></div>
+      </div>
+      <p class="coin-line" id="result-coin" hidden>+1 coin 🪙</p>
+      <p class="next-line" id="result-next"></p>
+      <div class="btn-row">
+        <button class="btn huge" id="result-next-btn" type="button">Next</button>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost small" id="result-shop-btn" type="button">🥜 Shop</button>
+        <button class="btn ghost small" id="result-menu-btn" type="button">Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================ SHOP ============================= -->
+  <div id="shop" class="sheet" hidden>
+    <div class="sheet-inner">
+      <h2>🥜 Peanut Shop</h2>
+      <div class="balance"><span class="cap">COINS</span>🪙 <span id="shop-coins">0</span></div>
+      <p id="shop-note">Everything costs 5 coins · one hat and one jersey at a time</p>
+      <div id="shop-grid"></div>
+      <button class="btn huge" id="shop-close-btn" type="button">Done</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

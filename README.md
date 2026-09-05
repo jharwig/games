@@ -194,3 +194,23 @@ Nitro Racing is a third-person 3D arcade racing game in a bright cartoon style. 
 - **Space** — special ability (3 uses per race)
 - **M** — mute / unmute, **R** — restart the race
 - **Phone**: tilt to steer, with on-screen GAS and ABILITY buttons (and a BRAKE button). Tilt asks for permission the first time; say no and you get LEFT / RIGHT buttons instead.
+
+## Slam Trunk
+
+**Designed by Anya**
+
+**Play:** https://jharwig.github.io/games/slamtrunk/
+
+Slam Trunk is a 3D basketball game played by elephants: you shoot peanuts out of your trunk into a giant peanut bowl on a pole. You are **Peanut**, the gray elephant with big floppy ears and a friendly smile. Your opponent is **Ellie**, who is dark blue and has tusks. Everything is drawn in a realistic 3D style.
+
+- A game lasts **60 seconds**. Score more than Ellie and you **win a coin** and move on to the next stadium. Lose and you play the same stadium again.
+- **Drag** anywhere to aim your throw, then **let go** to shoot the peanut at your bowl. When Ellie has the peanut she shoots at her own bowl and blocks yours with her trunk — **tap** to jump and block her shot.
+- **Five stadiums**, always in this order: a **circus tent**, then **snow**, then a **city at night**, then the **moon**, then the **beach**. After the beach it starts over and Ellie gets harder every time around.
+- The **shop** opens once you have **5 coins**. Everything costs 5 coins: crown, party hat, sunglasses, red / purple / green jersey, sneakers, cape, and bow tie. You can wear one of each kind at the same time, so Peanut can go out in a full outfit.
+- Sounds for everything: the swish of a peanut dropping through the bowl, elephant trumpets, the crowd cheering or groaning, and the end-of-game buzzer.
+
+### Controls
+
+- **Drag** — aim, **let go** — shoot
+- **Tap** — jump and block Ellie's shot
+- Plays on a **phone** (touch) and on a **computer** (mouse) the same way
